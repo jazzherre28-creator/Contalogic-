@@ -1,4 +1,7 @@
 -- 7. Expand tax_dictionary with frequently searched Colombian tax terms.
+ALTER TABLE public.tax_dictionary
+  ADD COLUMN IF NOT EXISTS sectors text[] NOT NULL DEFAULT ARRAY['todos'];
+
 INSERT INTO public.tax_dictionary (term, definition, estatuto_article, sectors, entity_types) VALUES
 ('Régimen Ordinario', 'Régimen general del impuesto sobre la renta para contribuyentes que no pertenecen a un régimen especial u opcional.', 'Art. 240 ET', ARRAY['todos'], ARRAY['ambas']),
 ('Declaración de Renta', 'Declaración anual en la que se informan ingresos, costos, deducciones, patrimonio y retenciones para determinar el impuesto de renta.', 'Art. 591-594 ET', ARRAY['todos'], ARRAY['ambas']),
