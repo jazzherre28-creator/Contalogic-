@@ -1,0 +1,280 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* CONTALOGIC AI+ — Terminal Financiera Universal
+   Tema: negro profundo · acentos azul eléctrico · brillo amarillo neón · glassmorphism */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-neon: var(--neon);
+  --color-emerald-glow: var(--emerald-glow);
+  --color-grid: var(--grid);
+  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+:root {
+  --radius: 0.75rem;
+
+  /* Negro profundo + capas */
+  --background: oklch(0.13 0.02 260);
+  --foreground: oklch(0.96 0.01 90);
+
+  --card: oklch(0.17 0.02 260 / 0.6);
+  --card-foreground: oklch(0.96 0.01 90);
+
+  --popover: oklch(0.15 0.02 260);
+  --popover-foreground: oklch(0.96 0.01 90);
+
+  /* Azul eléctrico = primario (antes naranja) */
+  --primary: oklch(0.7 0.22 245);
+  --primary-foreground: oklch(0.12 0.02 260);
+
+  /* Amarillo neón = acento de acción / éxito (antes esmeralda) */
+  --secondary: oklch(0.92 0.2 105);
+  --secondary-foreground: oklch(0.12 0.02 260);
+
+  --muted: oklch(0.22 0.02 260);
+  --muted-foreground: oklch(0.72 0.02 260);
+
+  --accent: oklch(0.92 0.2 105);
+  --accent-foreground: oklch(0.12 0.02 260);
+
+  --destructive: oklch(0.65 0.25 25);
+  --destructive-foreground: oklch(0.98 0 0);
+
+  --border: oklch(0.7 0.22 245 / 0.25);
+  --input: oklch(0.2 0.02 260 / 0.7);
+  --ring: oklch(0.7 0.22 245 / 0.6);
+
+  /* Tokens semánticos: --neon = AZUL eléctrico, --emerald-glow = AMARILLO neón
+     (mantenemos los nombres por compatibilidad con todas las clases existentes) */
+  --neon: oklch(0.7 0.22 245);
+  --emerald-glow: oklch(0.92 0.2 105);
+  --grid: oklch(0.7 0.22 245 / 0.07);
+
+  /* Gradientes y sombras */
+  --gradient-bg: radial-gradient(
+      ellipse at top,
+      oklch(0.22 0.1 245 / 0.4),
+      transparent 60%
+    ),
+    radial-gradient(ellipse at bottom right, oklch(0.25 0.12 105 / 0.22), transparent 60%),
+    linear-gradient(180deg, oklch(0.1 0.02 260), oklch(0.13 0.02 260));
+  --gradient-neon: linear-gradient(135deg, oklch(0.7 0.22 245), oklch(0.6 0.24 265));
+  --gradient-emerald: linear-gradient(135deg, oklch(0.92 0.2 105), oklch(0.85 0.22 90));
+
+  --shadow-neon: 0 0 0 1px oklch(0.7 0.22 245 / 0.4),
+    0 0 24px -4px oklch(0.7 0.22 245 / 0.55);
+  --shadow-emerald: 0 0 0 1px oklch(0.92 0.2 105 / 0.45),
+    0 8px 32px -8px oklch(0.92 0.2 105 / 0.55);
+  --shadow-glass: 0 8px 32px -8px oklch(0 0 0 / 0.6),
+    inset 0 1px 0 oklch(1 0 0 / 0.05);
+
+  --glass-bg: oklch(0.17 0.02 260 / 0.55);
+  --glass-border: oklch(1 0 0 / 0.08);
+}
+
+.dark {
+  --background: oklch(0.13 0.02 260);
+  --foreground: oklch(0.96 0.01 90);
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background: var(--gradient-bg);
+    background-attachment: fixed;
+    color: var(--color-foreground);
+    font-family: var(--font-display);
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image: linear-gradient(var(--color-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--color-grid) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+    z-index: 0;
+  }
+  #root {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+@layer components {
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-glass);
+    border-radius: var(--radius-xl);
+  }
+  .glass-neon {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid oklch(0.7 0.22 245 / 0.4);
+    box-shadow: var(--shadow-neon), var(--shadow-glass);
+    border-radius: var(--radius-xl);
+  }
+  .text-neon {
+    color: var(--neon);
+    text-shadow: 0 0 18px oklch(0.7 0.22 245 / 0.55);
+  }
+  .text-emerald-glow {
+    color: var(--emerald-glow);
+    text-shadow: 0 0 18px oklch(0.92 0.2 105 / 0.55);
+  }
+  .input-neon {
+    background: var(--input);
+    border: 1px solid oklch(0.7 0.22 245 / 0.5);
+    border-radius: var(--radius-md);
+    color: var(--foreground);
+    padding: 0.7rem 0.9rem;
+    width: 100%;
+    transition: all 0.2s ease;
+    font-family: var(--font-display);
+  }
+  .input-neon:focus {
+    outline: none;
+    border-color: var(--neon);
+    box-shadow: 0 0 0 3px oklch(0.7 0.22 245 / 0.2),
+      0 0 24px -4px oklch(0.7 0.22 245 / 0.6);
+  }
+  .input-neon::placeholder {
+    color: oklch(0.6 0.02 260);
+  }
+  .btn-emerald {
+    background: var(--gradient-emerald);
+    color: oklch(0.12 0.02 260);
+    border-radius: var(--radius-md);
+    padding: 0.7rem 1.2rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    box-shadow: var(--shadow-emerald);
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    border: none;
+    cursor: pointer;
+  }
+  .btn-emerald:hover {
+    filter: brightness(1.08);
+    box-shadow: 0 0 0 1px oklch(0.92 0.2 105 / 0.65),
+      0 12px 40px -10px oklch(0.92 0.2 105 / 0.8);
+    transform: translateY(-1px);
+  }
+  .btn-emerald:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn-neon {
+    background: transparent;
+    color: var(--neon);
+    border: 1px solid oklch(0.7 0.22 245 / 0.55);
+    border-radius: var(--radius-md);
+    padding: 0.6rem 1rem;
+    font-weight: 500;
+    transition: all 0.18s ease;
+    cursor: pointer;
+  }
+  .btn-neon:hover {
+    background: oklch(0.7 0.22 245 / 0.14);
+    box-shadow: 0 0 18px -4px oklch(0.7 0.22 245 / 0.55);
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    border: 1px solid var(--glass-border);
+    background: oklch(0.18 0.02 260 / 0.7);
+    color: var(--muted-foreground);
+    font-family: var(--font-mono);
+  }
+  .chip-neon {
+    border-color: oklch(0.7 0.22 245 / 0.55);
+    color: var(--neon);
+    background: oklch(0.7 0.22 245 / 0.1);
+  }
+  .glow-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.55;
+    pointer-events: none;
+  }
+  .scanline::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent 0px,
+      transparent 3px,
+      oklch(1 0 0 / 0.015) 3px,
+      oklch(1 0 0 / 0.015) 4px
+    );
+    pointer-events: none;
+    border-radius: inherit;
+  }
+  @keyframes pulseNeon {
+    0%, 100% { box-shadow: 0 0 0 1px oklch(0.7 0.22 245 / 0.45), 0 0 12px -2px oklch(0.7 0.22 245 / 0.45); }
+    50% { box-shadow: 0 0 0 1px oklch(0.7 0.22 245 / 0.75), 0 0 28px -2px oklch(0.7 0.22 245 / 0.8); }
+  }
+  .pulse-neon { animation: pulseNeon 2.4s ease-in-out infinite; }
+
+  /* Cenefa / ticker tape de indicadores económicos */
+  @keyframes tickerSlide {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+  .ticker-track {
+    display: inline-flex;
+    gap: 2.5rem;
+    padding-right: 2.5rem;
+    animation: tickerSlide 60s linear infinite;
+    white-space: nowrap;
+  }
+  .ticker-track:hover { animation-play-state: paused; }
+}

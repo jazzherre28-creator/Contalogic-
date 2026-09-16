@@ -1,0 +1,13 @@
+project_id = "cjcrptudurcwsyhhbkdo"
+
+[functions.lex-ai-chat]
+verify_jwt = false
+
+[functions.lex-ai-analyze]
+verify_jwt = false
+
+[functions.admin-users]
+verify_jwt = false
+
+[functions.scan-tax-reminders]
+verify_jwt = false
