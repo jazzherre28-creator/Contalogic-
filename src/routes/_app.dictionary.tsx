@@ -22,6 +22,7 @@ function DictionaryPage() {
   const { profile } = useAuth();
   const [terms, setTerms] = useState<Term[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [sectorFilter, setSectorFilter] = useState<"mine" | "all" | SectorKey>("mine");
 
@@ -30,8 +31,21 @@ function DictionaryPage() {
       .from("tax_dictionary")
       .select("*")
       .order("term", { ascending: true })
-      .then(({ data }) => {
-        setTerms((data ?? []) as Term[]);
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("No se pudo cargar el diccionario tributario", error);
+          setLoadError("No fue posible cargar el diccionario. Intenta nuevamente.");
+          setTerms([]);
+        } else {
+          setLoadError(null);
+          setTerms(
+            (data ?? []).map((row) => ({
+              ...(row as Term),
+              sectors: Array.isArray(row.sectors) ? row.sectors : [],
+              entity_types: Array.isArray(row.entity_types) ? row.entity_types : [],
+            })),
+          );
+        }
         setLoading(false);
       });
   }, []);
@@ -43,13 +57,21 @@ function DictionaryPage() {
     } else if (sectorFilter !== "mine" && sectorFilter !== "all") {
       list = list.filter((t) => t.sectors.includes("todos") || t.sectors.includes(sectorFilter));
     }
+    if (profile?.entity_type) {
+      list = list.filter(
+        (t) =>
+          t.entity_types.length === 0 ||
+          t.entity_types.includes("todos") ||
+          t.entity_types.includes(profile.entity_type!),
+      );
+    }
     const needle = q.trim().toLowerCase();
     if (needle) {
       list = list.filter(
         (t) =>
           t.term.toLowerCase().includes(needle) ||
           t.definition.toLowerCase().includes(needle) ||
-          (t.estatuto_article ?? "").toLowerCase().includes(needle)
+          (t.estatuto_article ?? "").toLowerCase().includes(needle),
       );
     }
     return list;
@@ -81,7 +103,9 @@ function DictionaryPage() {
             onChange={(e) => setSectorFilter(e.target.value as typeof sectorFilter)}
             className="input-neon sm:w-56"
           >
-            <option value="mine">⚡ Mi sector ({SECTOR_LABEL[profile?.sector ?? "transporte"]})</option>
+            <option value="mine">
+              ⚡ Mi sector ({SECTOR_LABEL[profile?.sector ?? "transporte"]})
+            </option>
             <option value="all">Todos los sectores</option>
             <option value="transporte">Transporte</option>
             <option value="comercio">Comercio</option>
@@ -94,6 +118,10 @@ function DictionaryPage() {
       {loading ? (
         <div className="glass grid place-items-center py-20">
           <Loader2 className="h-6 w-6 animate-spin text-neon" />
+        </div>
+      ) : loadError ? (
+        <div className="glass col-span-full px-5 py-8 text-center text-sm text-destructive">
+          {loadError}
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
@@ -117,11 +145,13 @@ function DictionaryPage() {
                 </header>
                 <p className="text-sm leading-relaxed text-foreground/90">{t.definition}</p>
                 <footer className="flex flex-wrap gap-1">
-                  {t.sectors.filter((s) => s !== "todos").map((s) => (
-                    <span key={s} className="chip text-[9px]">
-                      {SECTOR_LABEL[s as SectorKey] ?? s}
-                    </span>
-                  ))}
+                  {t.sectors
+                    .filter((s) => s !== "todos")
+                    .map((s) => (
+                      <span key={s} className="chip text-[9px]">
+                        {SECTOR_LABEL[s as SectorKey] ?? s}
+                      </span>
+                    ))}
                   {t.sectors.includes("todos") && (
                     <span className="chip chip-neon text-[9px]">TODOS LOS SECTORES</span>
                   )}

@@ -143,6 +143,12 @@ Deno.serve(async (req) => {
         });
       }
 
+      const { data: targetAuthUser, error: targetUserError } =
+        await admin.auth.admin.getUserById(targetUserId);
+      if (targetUserError) throw targetUserError;
+      const protectedOwner =
+        targetAuthUser.user.email?.toLowerCase() === "jazzherre28@gmail.com";
+
       if (action === "grant_role") {
         const { error } = await admin
           .from("user_roles")
@@ -153,6 +159,17 @@ Deno.serve(async (req) => {
           });
         if (error && !error.message.includes("duplicate")) throw error;
       } else {
+        if (protectedOwner) {
+          return new Response(
+            JSON.stringify({
+              error: "La cuenta propietaria está protegida y no puede perder sus roles",
+            }),
+            {
+              status: 403,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            },
+          );
+        }
         // Prevent removing the last super_admin
         if (role === "super_admin") {
           const { count } = await admin
@@ -196,6 +213,18 @@ Deno.serve(async (req) => {
           JSON.stringify({ error: "No puedes eliminarte a ti mismo" }),
           {
             status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+      const { data: targetAuthUser, error: targetUserError } =
+        await admin.auth.admin.getUserById(targetUserId);
+      if (targetUserError) throw targetUserError;
+      if (targetAuthUser.user.email?.toLowerCase() === "jazzherre28@gmail.com") {
+        return new Response(
+          JSON.stringify({ error: "La cuenta propietaria está protegida" }),
+          {
+            status: 403,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           },
         );
