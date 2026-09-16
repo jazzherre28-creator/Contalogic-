@@ -12,8 +12,8 @@ serve(async (req) => {
 
   try {
     const { messages, entityType, sector } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY no configurada");
+    const LOVABLE_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("GEMINI_API_KEY no configurada");
 
     const entidad = entityType === "juridica" ? "Persona Jurídica" : "Persona Natural";
     const enfoqueLegal =
@@ -43,17 +43,20 @@ ${enfoqueLegal}
 - Aclara que tus respuestas son orientativas y no reemplazan a un contador público titulado.`;
 
     const response = await fetch(
-      "https://ai.gateway.lovable.dev/v1/chat/completions",
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${encodeURIComponent(LOVABLE_API_KEY)}`,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${LOVABLE_API_KEY}`,
           "Content-Type": "application/json",
+          ["Authorization"]: "",
         },
         body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
-          messages: [{ role: "system", content: systemPrompt }, ...messages],
-          stream: true,
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: messages.map((message: { role: string; content: string }) => ({
+            role: message.role === "assistant" ? "model" : "user",
+            parts: [{ text: message.content }],
+          })),
         }),
       }
     );
@@ -79,7 +82,13 @@ ${enfoqueLegal}
       });
     }
 
-    return new Response(response.body, {
+    const data = await response.json();
+    const text =
+      data?.candidates?.[0]?.content?.parts
+        ?.map((part: { text?: string }) => part.text ?? "")
+        .join("") ?? "";
+    const stream = `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] })}\n\ndata: [DONE]\n\n`;
+    return new Response(stream, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
   } catch (e) {

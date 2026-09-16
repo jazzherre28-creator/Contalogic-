@@ -101,7 +101,11 @@ function LexAiPage() {
           }
           try {
             const parsed = JSON.parse(json);
-            const c = parsed.choices?.[0]?.delta?.content;
+            const c =
+              parsed.choices?.[0]?.delta?.content ??
+              parsed.candidates?.[0]?.content?.parts
+                ?.map((part: { text?: string }) => part.text ?? "")
+                .join("");
             if (c) upsert(c);
           } catch {
             buffer = line + "\n" + buffer;

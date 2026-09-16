@@ -12,8 +12,8 @@ serve(async (req) => {
 
   try {
     const { rawText, totals, lineItems, docType, entityType, sector } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY no configurada");
+    const LOVABLE_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("GEMINI_API_KEY no configurada");
 
     const entidad = entityType === "juridica" ? "Persona Jurídica" : "Persona Natural";
     const docName =
@@ -82,19 +82,17 @@ ${textPreview}
 Analiza este documento siguiendo la estructura indicada.`;
 
     const response = await fetch(
-      "https://ai.gateway.lovable.dev/v1/chat/completions",
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${encodeURIComponent(LOVABLE_API_KEY)}`,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${LOVABLE_API_KEY}`,
           "Content-Type": "application/json",
+          ["Authorization"]: "",
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
         }),
       }
     );
@@ -121,7 +119,10 @@ Analiza este documento siguiendo la estructura indicada.`;
     }
 
     const data = await response.json();
-    const analysis = data?.choices?.[0]?.message?.content ?? "Sin respuesta del modelo.";
+    const analysis =
+      data?.candidates?.[0]?.content?.parts
+        ?.map((part: { text?: string }) => part.text ?? "")
+        .join("") ?? "Sin respuesta del modelo.";
 
     return new Response(JSON.stringify({ analysis }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
