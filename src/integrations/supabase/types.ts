@@ -53,6 +53,7 @@ export type Database = {
           kind: string
           note: string | null
           recorded_at: string
+          source: string
           user_id: string
         }
         Insert: {
@@ -63,6 +64,7 @@ export type Database = {
           kind: string
           note?: string | null
           recorded_at?: string
+          source?: string
           user_id: string
         }
         Update: {
@@ -73,6 +75,7 @@ export type Database = {
           kind?: string
           note?: string | null
           recorded_at?: string
+          source?: string
           user_id?: string
         }
         Relationships: []
@@ -248,6 +251,81 @@ export type Database = {
           id?: string
           sectors?: string[]
           term?: string
+        }
+        Relationships: []
+      }
+      transport_trips: {
+        Row: {
+          capacity_kg: number
+          cargo_items: Json
+          created_at: string
+          customer_advance_cop: number
+          customer_final_payment_cop: number
+          customer_withheld_cop: number
+          destination: string
+          driver_advance_cop: number
+          driver_cash_returned_cop: number
+          driver_name: string | null
+          empty_km: number
+          expenses: Json
+          fuel_liters: number
+          freight_cop: number
+          id: string
+          loaded_km: number
+          origin: string
+          other_customer_collection_cop: number
+          surcharge_cop: number
+          trip_date: string
+          user_id: string
+          vehicle_plate: string
+        }
+        Insert: {
+          capacity_kg: number
+          cargo_items?: Json
+          created_at?: string
+          customer_advance_cop?: number
+          customer_final_payment_cop?: number
+          customer_withheld_cop?: number
+          destination: string
+          driver_advance_cop?: number
+          driver_cash_returned_cop?: number
+          driver_name?: string | null
+          empty_km?: number
+          expenses?: Json
+          fuel_liters?: number
+          freight_cop?: number
+          id?: string
+          loaded_km?: number
+          origin: string
+          other_customer_collection_cop?: number
+          surcharge_cop?: number
+          trip_date?: string
+          user_id: string
+          vehicle_plate: string
+        }
+        Update: {
+          capacity_kg?: number
+          cargo_items?: Json
+          created_at?: string
+          customer_advance_cop?: number
+          customer_final_payment_cop?: number
+          customer_withheld_cop?: number
+          destination?: string
+          driver_advance_cop?: number
+          driver_cash_returned_cop?: number
+          driver_name?: string | null
+          empty_km?: number
+          expenses?: Json
+          fuel_liters?: number
+          freight_cop?: number
+          id?: string
+          loaded_km?: number
+          origin?: string
+          other_customer_collection_cop?: number
+          surcharge_cop?: number
+          trip_date?: string
+          user_id?: string
+          vehicle_plate?: string
         }
         Relationships: []
       }

@@ -2,11 +2,14 @@
 
 export type ClassifiedTotals = {
   ingresos: number;
+  otrosIngresosOperativos: number;
+  ingresosFinancieros: number;
   costos: number;
   gastos: number;
   gastosAdmin: number;
   gastosVentas: number;
   gastosFinancieros: number;
+  impuestoRenta: number;
   depreciacion: number;
   activos: number;
   activosCorrientes: number;
@@ -16,8 +19,23 @@ export type ClassifiedTotals = {
   pasivosCorrientes: number;
   pasivosNoCorrientes: number;
   patrimonio: number;
+  utilidadBruta: number;
+  utilidadAntesImpuestos: number;
   utilidadNeta: number;
   utilidadOperativa: number;
+  hasTotalAssets: boolean;
+  hasCurrentAssets: boolean;
+  hasNonCurrentAssets: boolean;
+  hasTotalLiabilities: boolean;
+  hasCurrentLiabilities: boolean;
+  hasNonCurrentLiabilities: boolean;
+  hasEquity: boolean;
+  hasInventory: boolean;
+  hasIncomeTax: boolean;
+  hasNetIncome: boolean;
+  hasGrossProfit: boolean;
+  hasOperatingProfit: boolean;
+  hasProfitBeforeTax: boolean;
   ingresosEntries: [string, number][];
   costEntries: [string, number][];
   expenseEntries: [string, number][];
@@ -51,109 +69,218 @@ export type ScenarioRow = {
 };
 
 const sum = (arr: [string, number][]) => arr.reduce((s, [, v]) => s + v, 0);
+const sumAbs = (arr: [string, number][]) => arr.reduce((s, [, v]) => s + Math.abs(v), 0);
 
-const match = (k: string, re: RegExp) => re.test(k);
+const match = (k: string, re: RegExp) =>
+  re.test(k.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase());
 
 const isIncome = (k: string) =>
-  match(k, /ingres|venta|honor|factur|operacional/i) && !match(k, /gasto|costo|egreso|pasiv|activ|deuda/i);
+  match(k, /ingres|\bventas?\b|honor|factur|operacional/i) &&
+  !match(k, /gasto|costo|egreso|pasiv|activos?\b|deuda|financier|interes|rendimiento|utilidad|resultado|ganancia|margen|ebit|uaii|otros ingresos operativos/i);
 
 const isCost = (k: string) => match(k, /costo|cmv|mercanc|materia|producci/i) && !match(k, /ingres/i);
 
 const isExpense = (k: string) =>
   (match(k, /gasto|marketing|publicidad|comision|arrend|sueld|nomina|deprec|amortiz/i) ||
     (match(k, /servicio|operac/i) && match(k, /gasto|admin/i))) &&
-  !match(k, /ingres|venta/i);
+  !match(k,   /ingres|financ|interes|impuesto|tribut|depreciacion acumulada|gastos? pagados por anticipado|activos? por derechos? de uso|propiedades? de inversion/i);
 
 const isAdminExpense = (k: string) => match(k, /admin|gerenc|oficin|legal|contab/i) && match(k, /gasto/i);
 const isSalesExpense = (k: string) => match(k, /venta|comercial|marketing|publicidad/i) && match(k, /gasto/i);
-const isFinancialExpense = (k: string) => match(k, /financ|interes|bancar|comision.*banc/i);
+const isFinancialExpense = (k: string) =>
+  match(k, /gasto.*financ|interes|comision.*banc/i) && !match(k, /ingres|rendimiento/i);
+const isFinancialIncome = (k: string) =>
+  match(k, /ingres.*financ|ingres.*interes|rendimiento.*financ|interes.*(ganad|recibid)|rendimientos?/i);
+const isOtherOperatingIncome = (k: string) => match(k, /otros?\s+ingresos?\s+operativ/i);
+const isIncomeTax = (k: string) => match(k, /impuesto.*renta|renta.*impuesto|gasto.*tributario/i);
 const isDepreciation = (k: string) => match(k, /deprec|amortiz/i);
+const isOperatingExpenseTotal = (k: string) =>
+  match(k, /^(gastos?|costos?)\s+operacionales?$/i) || match(k, /^gastos?\s+operativos?$/i);
 
-const isAsset = (k: string) => match(k, /activ/i) && !match(k, /pasiv/i);
+const isAsset = (k: string) =>
+  match(k, /activ|propiedad|planta|equipo|inversion|derechos? de uso|depreciacion acumulada/i) &&
+  !match(k, /pasiv|depreciaciones?\s+de\b|gastos? pagados por anticipado/i);
 const isNonCurrentAsset = (k: string) =>
-  match(k, /no corrien|fijo|propiedad|planta|equipo|inmovilizado|largo plazo/i) && match(k, /activ/i);
+  match(k, /no corrien|fijo|propiedad|planta|equipo|inmovilizado|largo plazo|derechos? de uso|depreciacion acumulada/i) &&
+  !match(k, /depreciaciones?\s+de\b|gastos? pagados por anticipado/i);
 const isInventory = (k: string) => match(k, /invent|existenc|mercanc/i) && !match(k, /costo|cmv/i);
-const isLiability = (k: string) => match(k, /pasiv|deuda|oblig/i) && !match(k, /activ|patrim|capit/i);
+const isLiability = (k: string) =>
+  match(k, /pasiv|deuda|oblig|proveed|cuentas?\s+por\s+pagar|impuestos?.*pagar|beneficios.*empleados|acreedor/i) &&
+  !match(k, /activ|patrim|capit/i);
 const isNonCurrentLiability = (k: string) =>
-  match(k, /no corrien|largo plazo|bono|credito.*largo/i) && match(k, /pasiv|deuda|oblig/i);
-const isEquity = (k: string) => match(k, /patrim|capit|reserv|utilidad.*ejercicio/i);
+  match(k, /no corrien|largo plazo|bono|credito.*largo/i) &&
+  match(k, /pasiv|deuda|oblig|proveed|cuentas?\s+por\s+pagar/i);
+const isEquity = (k: string) =>
+  match(k, /patrim|capital|reserv|utilidad.*ejercicio|resultado.*ejercicio/i) && !match(k, /pasiv/i);
 const isCurrentAsset = (k: string) =>
-  match(k, /corrien|circulante|disponib|caja|banco|efectivo|cartera|deudor/i) && !match(k, /pasiv/i);
+  match(k, /corrien|circulante|disponib|caja|banco|efectivo|cartera|deudor|cuentas?\s+por\s+cobrar|invent|anticipad|corto plazo/i) &&
+  !match(k, /pasiv/i);
 const isCurrentLiability = (k: string) =>
-  match(k, /corrien|circulante|proveed|acreed|oblig/i) && match(k, /pasiv|proveed|acreed|oblig/i);
+  match(k, /corrien|circulante|proveed|acreed|oblig|cuentas?\s+por\s+pagar|impuestos?.*pagar|beneficios.*empleados/i);
 const isNetIncome = (k: string) => match(k, /utilidad.*neta|resultado.*ejercicio|ganancia.*neta/i);
+const isGrossProfit = (k: string) => match(k, /utilidad.*bruta|resultado.*bruto/i);
+const isOperatingProfit = (k: string) => match(k, /utilidad.*operaci|resultado.*operaci|\bebit\b/i);
+const isProfitBeforeTax = (k: string) => match(k, /utilidad.*antes.*impuesto|resultado.*antes.*impuesto|\buaii\b/i);
 const isAssetTotal = (k: string) => match(k, /(^|\b)total(es)?\s+activos?(\s+totales?)?$|(^|\b)activos?(\s+totales?)$/i) && !match(k, /corrien|no corrien|no corrientes/i);
 const isLiabilityTotal = (k: string) => match(k, /(^|\b)total(es)?\s+pasivos?(\s+totales?)?$|(^|\b)pasivos?(\s+totales?)$/i) && !match(k, /corrien|no corrien|no corrientes/i);
-const isEquityTotal = (k: string) => match(k, /(^|\b)patrimonio(\s+neto)?$|(^|\b)capital\s+contable$|(^|\b)capital\s+propiedad$/i);
+const isEquityTotal = (k: string) =>
+  match(k, /(^|\b)patrimonio(\s+neto)?$|(^|\b)total(?:es)?\s+patrimonio(\s+neto)?$|(^|\b)capital\s+contable$|(^|\b)capital\s+propiedad$/i);
+const isCurrentAssetTotal = (k: string) => match(k, /^activos?\s+corrientes?$/i);
+const isNonCurrentAssetTotal = (k: string) => match(k, /^activos?\s+no\s+corrientes?$/i);
+const isCurrentLiabilityTotal = (k: string) => match(k, /^pasivos?\s+corrientes?$/i);
+const isNonCurrentLiabilityTotal = (k: string) => match(k, /^pasivos?\s+no\s+corrientes?$/i);
 
 export function classifyTotals(totals: Record<string, number>): ClassifiedTotals {
   const entries = Object.entries(totals).filter(([, v]) => v !== 0);
   const ingresosEntries = entries.filter(([k]) => isIncome(k));
   const costEntries = entries.filter(([k]) => isCost(k));
-  const expenseEntries = entries.filter(([k]) => isExpense(k));
+  const allExpenseEntries = entries.filter(([k]) => isExpense(k));
+  const detailExpenseEntries = allExpenseEntries.filter(([k]) => !isOperatingExpenseTotal(k));
+  const hasOperatingExpenseTotal = allExpenseEntries.some(([k]) => isOperatingExpenseTotal(k));
+  const expenseEntries =
+    hasOperatingExpenseTotal && detailExpenseEntries.length > 0 ? detailExpenseEntries : allExpenseEntries;
   const balanceEntries = entries.filter(([k]) => isAsset(k) || isLiability(k) || isEquity(k));
   const classified = new Set([
     ...ingresosEntries.map(([k]) => k),
     ...costEntries.map(([k]) => k),
     ...expenseEntries.map(([k]) => k),
     ...balanceEntries.map(([k]) => k),
+    ...entries
+      .filter(([k]) =>
+        isOtherOperatingIncome(k) ||
+        isFinancialIncome(k) ||
+        isFinancialExpense(k) ||
+        isIncomeTax(k) ||
+        isOperatingExpenseTotal(k) ||
+        isGrossProfit(k) ||
+        isOperatingProfit(k) ||
+        isProfitBeforeTax(k) ||
+        isNetIncome(k)
+      )
+      .map(([k]) => k),
   ]);
   const otherEntries = entries.filter(([k]) => !classified.has(k));
 
   const ingresos = sum(ingresosEntries);
-  const costos = sum(costEntries);
-  const gastos = sum(expenseEntries);
-  const gastosAdmin = sum(expenseEntries.filter(([k]) => isAdminExpense(k)));
-  const gastosVentas = sum(expenseEntries.filter(([k]) => isSalesExpense(k)));
-  const gastosFinancieros = sum(entries.filter(([k]) => isFinancialExpense(k)));
-  const depreciacion = sum(entries.filter(([k]) => isDepreciation(k)));
+  const otrosIngresosOperativos = sum(entries.filter(([k]) => isOtherOperatingIncome(k)));
+  const ingresosFinancieros = sum(entries.filter(([k]) => isFinancialIncome(k)));
+  const costos = sumAbs(costEntries);
+  const gastos = hasOperatingExpenseTotal
+    ? sumAbs(allExpenseEntries.filter(([k]) => isOperatingExpenseTotal(k)))
+    : sumAbs(expenseEntries);
+  const gastosAdmin = sumAbs(expenseEntries.filter(([k]) => isAdminExpense(k)));
+  const gastosVentas = sumAbs(expenseEntries.filter(([k]) => isSalesExpense(k)));
+  const gastosFinancieros = sumAbs(entries.filter(([k]) => isFinancialExpense(k)));
+  const impuestoRenta = sumAbs(entries.filter(([k]) => isIncomeTax(k)));
+  const depreciacion = sumAbs(entries.filter(([k]) => isDepreciation(k)));
 
   const explicitActivoTotal = entries.filter(([k]) => isAssetTotal(k));
   const explicitPasivoTotal = entries.filter(([k]) => isLiabilityTotal(k));
   const explicitPatrimonioTotal = entries.filter(([k]) => isEquityTotal(k));
+  const explicitCurrentAssets = entries.filter(([k]) => isCurrentAssetTotal(k));
+  const explicitNonCurrentAssets = entries.filter(([k]) => isNonCurrentAssetTotal(k));
+  const explicitCurrentLiabilities = entries.filter(([k]) => isCurrentLiabilityTotal(k));
+  const explicitNonCurrentLiabilities = entries.filter(([k]) => isNonCurrentLiabilityTotal(k));
 
-  const activos =
-    explicitActivoTotal.length > 0
-      ? sum(explicitActivoTotal)
-      : entries.filter(([k]) => isAsset(k)).reduce((s, [, v]) => s + v, 0);
-  const activosCorrientes = entries.filter(([k]) => isCurrentAsset(k)).reduce((s, [, v]) => s + v, 0);
-  const activosNoCorrientes = entries.filter(([k]) => isNonCurrentAsset(k)).reduce((s, [, v]) => s + v, 0);
-  const inventarios = entries.filter(([k]) => isInventory(k)).reduce((s, [, v]) => s + v, 0);
-  const pasivos =
-    explicitPasivoTotal.length > 0
-      ? sum(explicitPasivoTotal)
-      : entries.filter(([k]) => isLiability(k)).reduce((s, [, v]) => s + v, 0);
-  const pasivosCorrientes = entries.filter(([k]) => isCurrentLiability(k)).reduce((s, [, v]) => s + v, 0);
-  const pasivosNoCorrientes = entries.filter(([k]) => isNonCurrentLiability(k)).reduce((s, [, v]) => s + v, 0);
-  const patrimonio =
-    explicitPatrimonioTotal.length > 0
-      ? sum(explicitPatrimonioTotal)
-      : entries.filter(([k]) => isEquity(k)).reduce((s, [, v]) => s + v, 0);
+  const currentAssetDetails = entries.filter(([k]) => isCurrentAsset(k) && !isCurrentAssetTotal(k));
+  const nonCurrentAssetDetails = entries.filter(([k]) => isNonCurrentAsset(k) && !isNonCurrentAssetTotal(k));
+  const currentLiabilityDetails = entries.filter(([k]) => isCurrentLiability(k) && !isCurrentLiabilityTotal(k));
+  const nonCurrentLiabilityDetails = entries.filter(([k]) => isNonCurrentLiability(k) && !isNonCurrentLiabilityTotal(k));
+  const hasCurrentAssets = explicitCurrentAssets.length > 0 || currentAssetDetails.length > 0;
+  const hasCurrentLiabilities = explicitCurrentLiabilities.length > 0 || currentLiabilityDetails.length > 0;
+  const hasNonCurrentAssets = explicitNonCurrentAssets.length > 0 || nonCurrentAssetDetails.length > 0;
+  const hasNonCurrentLiabilities =
+    explicitNonCurrentLiabilities.length > 0 || nonCurrentLiabilityDetails.length > 0;
+  const activosCorrientes =
+    explicitCurrentAssets.length > 0 ? sum(explicitCurrentAssets) : sum(currentAssetDetails);
+  const activosNoCorrientes =
+    explicitNonCurrentAssets.length > 0 ? sum(explicitNonCurrentAssets) : sum(nonCurrentAssetDetails);
+  const hasTotalAssets =
+    explicitActivoTotal.length > 0 || (hasCurrentAssets && hasNonCurrentAssets);
+  const activos = explicitActivoTotal.length > 0
+    ? sum(explicitActivoTotal)
+    : hasTotalAssets
+      ? activosCorrientes + activosNoCorrientes
+      : 0;
+  const pasivosCorrientes =
+    explicitCurrentLiabilities.length > 0 ? sum(explicitCurrentLiabilities) : sum(currentLiabilityDetails);
+  const pasivosNoCorrientes =
+    explicitNonCurrentLiabilities.length > 0
+      ? sum(explicitNonCurrentLiabilities)
+      : sum(nonCurrentLiabilityDetails);
+  const hasTotalLiabilities =
+    explicitPasivoTotal.length > 0 || (hasCurrentLiabilities && hasNonCurrentLiabilities);
+  const pasivos = explicitPasivoTotal.length > 0
+    ? sum(explicitPasivoTotal)
+    : hasTotalLiabilities
+      ? pasivosCorrientes + pasivosNoCorrientes
+      : 0;
+  const hasEquity = explicitPatrimonioTotal.length > 0 || entries.some(([k]) => isEquity(k));
+  const patrimonio = explicitPatrimonioTotal.length > 0
+    ? sum(explicitPatrimonioTotal)
+    : sum(entries.filter(([k]) => isEquity(k)));
+  const inventarioEntries = entries.filter(([k]) => isInventory(k));
+  const inventarios = sum(inventarioEntries);
 
-  const utilidadFromEntries = entries.filter(([k]) => isNetIncome(k)).reduce((s, [, v]) => s + v, 0);
-  const utilidadOperativa = ingresos - costos - gastos + gastosFinancieros;
-  // Utilidad neta: preferimos la suma detectada explícitamente (si está),
-  // si no, calculamos como ingresos - costos - gastos (no restar dos veces gastosFinancieros).
-  const utilidadNeta = utilidadFromEntries || ingresos - costos - gastos;
+  const grossProfitEntries = entries.filter(([k]) => isGrossProfit(k));
+  const operatingProfitEntries = entries.filter(([k]) => isOperatingProfit(k));
+  const pretaxEntries = entries.filter(([k]) => isProfitBeforeTax(k));
+  const netIncomeEntries = entries.filter(([k]) => isNetIncome(k));
+  const hasGrossProfit = grossProfitEntries.length > 0 || (ingresosEntries.length > 0 && costEntries.length > 0);
+  const utilidadBruta = grossProfitEntries.length > 0 ? sum(grossProfitEntries) : ingresos - costos;
+  const hasOperatingProfit =
+    operatingProfitEntries.length > 0 || (hasGrossProfit && allExpenseEntries.length > 0);
+  const utilidadOperativa = operatingProfitEntries.length > 0
+    ? sum(operatingProfitEntries)
+    : utilidadBruta - gastos + otrosIngresosOperativos;
+  const hasProfitBeforeTax =
+    pretaxEntries.length > 0 ||
+    (operatingProfitEntries.length > 0 &&
+      entries.some(([k]) => isFinancialIncome(k) || isFinancialExpense(k) || isIncomeTax(k)));
+  const utilidadAntesImpuestos = pretaxEntries.length > 0
+    ? sum(pretaxEntries)
+    : utilidadOperativa + ingresosFinancieros - gastosFinancieros;
+  const hasNetIncome = netIncomeEntries.length > 0 || (hasProfitBeforeTax && entries.some(([k]) => isIncomeTax(k)));
+  const utilidadNeta = netIncomeEntries.length > 0
+    ? sum(netIncomeEntries)
+    : utilidadAntesImpuestos - impuestoRenta;
 
   return {
     ingresos,
+    otrosIngresosOperativos,
+    ingresosFinancieros,
     costos,
     gastos,
     gastosAdmin,
     gastosVentas,
     gastosFinancieros,
+    impuestoRenta,
     depreciacion,
     activos,
     activosCorrientes,
-    activosNoCorrientes: activosNoCorrientes || Math.max(0, activos - activosCorrientes),
+    activosNoCorrientes,
     inventarios,
     pasivos,
     pasivosCorrientes,
-    pasivosNoCorrientes: pasivosNoCorrientes || Math.max(0, pasivos - pasivosCorrientes),
+    pasivosNoCorrientes,
     patrimonio,
+    utilidadBruta,
+    utilidadAntesImpuestos,
     utilidadNeta,
     utilidadOperativa,
+    hasTotalAssets,
+    hasCurrentAssets,
+    hasNonCurrentAssets,
+    hasTotalLiabilities,
+    hasCurrentLiabilities,
+    hasNonCurrentLiabilities,
+    hasEquity,
+    hasInventory: inventarioEntries.length > 0,
+    hasIncomeTax: entries.some(([k]) => isIncomeTax(k)),
+    hasNetIncome: netIncomeEntries.length > 0,
+    hasGrossProfit: grossProfitEntries.length > 0,
+    hasOperatingProfit: operatingProfitEntries.length > 0,
+    hasProfitBeforeTax: pretaxEntries.length > 0,
     ingresosEntries,
     costEntries,
     expenseEntries,
@@ -205,21 +332,27 @@ function statusMargen(v: number | null): IndicatorRow["status"] {
 }
 
 export function computeBalanceIndicators(c: ClassifiedTotals): IndicatorRow[] {
-  const ac = c.activosCorrientes || (c.activos > 0 ? c.activos * 0.4 : 0);
-  const pc = c.pasivosCorrientes || (c.pasivos > 0 ? c.pasivos * 0.5 : 0);
+  const ac = c.activosCorrientes;
+  const pc = c.pasivosCorrientes;
   const inv = c.inventarios;
   const capitalTrabajo = ac - pc;
-  const liquidezCorriente = ratio(ac, pc);
-  const pruebaAcida = ratio(ac - inv, pc);
-  const solvencia = ratio(c.activos, c.pasivos);
-  const endeudamiento = pct(c.pasivos, c.activos);
-  const endeudamientoPat = ratio(c.pasivos, c.patrimonio);
-  const autonomia = pct(c.patrimonio, c.activos);
-  const roa = pct(c.utilidadNeta, c.activos);
-  const roe = pct(c.utilidadNeta, c.patrimonio);
-  const balanceCuadra = c.activos > 0 ? Math.abs(c.activos - (c.pasivos + c.patrimonio)) / c.activos : null;
-  const concentracionAC = pct(ac, c.activos);
-  const coberturaCT = pc > 0 ? ratio(capitalTrabajo, pc) : null;
+  const liquidezCorriente = c.hasCurrentAssets && c.hasCurrentLiabilities ? ratio(ac, pc) : null;
+  const pruebaAcida =
+    c.hasCurrentAssets && c.hasCurrentLiabilities && c.hasInventory ? ratio(ac - inv, pc) : null;
+  const solvencia = c.hasTotalAssets && c.hasTotalLiabilities ? ratio(c.activos, c.pasivos) : null;
+  const endeudamiento = c.hasTotalAssets && c.hasTotalLiabilities ? pct(c.pasivos, c.activos) : null;
+  const endeudamientoPat =
+    c.hasTotalLiabilities && c.hasEquity ? ratio(c.pasivos, c.patrimonio) : null;
+  const autonomia = c.hasEquity && c.hasTotalAssets ? pct(c.patrimonio, c.activos) : null;
+  const roa = c.hasNetIncome && c.hasTotalAssets ? pct(c.utilidadNeta, c.activos) : null;
+  const roe = c.hasNetIncome && c.hasEquity ? pct(c.utilidadNeta, c.patrimonio) : null;
+  const balanceCuadra =
+    c.hasTotalAssets && c.hasTotalLiabilities && c.hasEquity
+      ? Math.abs(c.activos - (c.pasivos + c.patrimonio)) / c.activos
+      : null;
+  const concentracionAC = c.hasCurrentAssets && c.hasTotalAssets ? pct(ac, c.activos) : null;
+  const coberturaCT =
+    c.hasCurrentAssets && c.hasCurrentLiabilities ? ratio(capitalTrabajo, pc) : null;
 
   const rows: IndicatorRow[] = [
     {
@@ -250,9 +383,14 @@ export function computeBalanceIndicators(c: ClassifiedTotals): IndicatorRow[] {
       name: "Capital de trabajo",
       formula: "Activos corrientes − Pasivos corrientes",
       value: capitalTrabajo,
-      display: fmtCOP(capitalTrabajo),
+      display: c.hasCurrentAssets && c.hasCurrentLiabilities ? fmtCOP(capitalTrabajo) : "N/D",
       benchmark: "> 0",
-      status: capitalTrabajo >= 0 ? "good" : "bad",
+      status:
+        !c.hasCurrentAssets || !c.hasCurrentLiabilities
+          ? "neutral"
+          : capitalTrabajo >= 0
+            ? "good"
+            : "bad",
       insight: "Recursos disponibles para operar el ciclo corto sin financiación externa.",
     },
     {
@@ -274,7 +412,14 @@ export function computeBalanceIndicators(c: ClassifiedTotals): IndicatorRow[] {
       value: solvencia,
       display: fmtRatio(solvencia),
       benchmark: "> 1.5x",
-      status: solvencia != null && solvencia >= 1.5 ? "good" : solvencia != null && solvencia >= 1 ? "warn" : "bad",
+      status:
+        solvencia == null
+          ? "neutral"
+          : solvencia >= 1.5
+            ? "good"
+            : solvencia >= 1
+              ? "warn"
+              : "bad",
       insight: "Capacidad de la empresa para honrar todas sus deudas con sus activos.",
     },
     {
@@ -351,8 +496,18 @@ export function computeBalanceIndicators(c: ClassifiedTotals): IndicatorRow[] {
       value: balanceCuadra != null ? balanceCuadra * 100 : null,
       display: balanceCuadra != null ? fmtPct(balanceCuadra * 100) : "N/D",
       benchmark: "< 5%",
-      status: balanceCuadra != null && balanceCuadra < 0.05 ? "good" : balanceCuadra != null && balanceCuadra < 0.15 ? "warn" : "bad",
-      insight: "Verifica si la ecuación contable fundamental se cumple con los datos extraídos.",
+      status:
+        balanceCuadra == null
+          ? "neutral"
+          : balanceCuadra < 0.05
+            ? "good"
+            : balanceCuadra < 0.15
+              ? "warn"
+              : "bad",
+      insight:
+        balanceCuadra == null
+          ? "No se puede comprobar: el documento no presenta los totales de pasivos y patrimonio."
+          : "Verifica si la ecuación contable fundamental se cumple con los datos extraídos.",
     },
   ];
 
@@ -361,22 +516,22 @@ export function computeBalanceIndicators(c: ClassifiedTotals): IndicatorRow[] {
 
 export function computePnLIndicators(c: ClassifiedTotals): IndicatorRow[] {
   const { ingresos, costos, gastos, gastosAdmin, gastosVentas, gastosFinancieros, depreciacion } = c;
-  const gastosOperativos = Math.max(0, gastos - gastosFinancieros);
-  const utilidadBruta = ingresos - costos;
-  const utilidadOperativa = ingresos - costos - gastosOperativos;
+  const gastosOperativos = gastos;
+  const utilidadBruta = c.utilidadBruta;
+  const utilidadOperativa = c.utilidadOperativa;
   const ebitda = utilidadOperativa + depreciacion;
-  const utilidadNeta = utilidadOperativa - gastosFinancieros;
+  const utilidadNeta = c.utilidadNeta;
 
-  const margenBruto = pct(utilidadBruta, ingresos);
-  const margenOperativo = pct(utilidadOperativa, ingresos);
-  const margenEbitda = pct(ebitda, ingresos);
-  const margenNeto = pct(utilidadNeta, ingresos);
+  const margenBruto = c.hasGrossProfit ? pct(utilidadBruta, ingresos) : null;
+  const margenOperativo = c.hasOperatingProfit ? pct(utilidadOperativa, ingresos) : null;
+  const margenEbitda = c.hasOperatingProfit ? pct(ebitda, ingresos) : null;
+  const margenNeto = c.hasNetIncome ? pct(utilidadNeta, ingresos) : null;
   const costoVentas = pct(costos, ingresos);
   const gastosOp = pct(gastosOperativos, ingresos);
   const gastosAdminPct = pct(gastosAdmin, ingresos);
   const gastosVentasPct = pct(gastosVentas, ingresos);
-  const margenContrib = pct(ingresos - costos, ingresos);
-  const puntoEquilibrio = margenContrib && margenContrib > 0 ? gastosOperativos / (margenContrib / 100) : null;
+  const margenContrib = null;
+  const puntoEquilibrio = null;
   const eficienciaOp = gastosOperativos > 0 ? ratio(ingresos, gastosOperativos) : null;
   const coberturaIntereses = gastosFinancieros > 0 ? ratio(utilidadOperativa, gastosFinancieros) : null;
   const rotacionCostos = costos > 0 ? ratio(ingresos, costos) : null;
@@ -531,14 +686,16 @@ export function computePnLIndicators(c: ClassifiedTotals): IndicatorRow[] {
 }
 
 export function computeBalanceScenarios(c: ClassifiedTotals): ScenarioRow[] {
-  const ac = c.activosCorrientes || c.activos * 0.4;
-  const pc = c.pasivosCorrientes || c.pasivos * 0.5;
+  if (!c.hasTotalAssets || !c.hasTotalLiabilities) return [];
+  const ac = c.activosCorrientes;
+  const pc = c.pasivosCorrientes;
+  const liquidity = c.hasCurrentAssets && c.hasCurrentLiabilities ? ratio(ac, pc) ?? undefined : undefined;
   const base = {
     activos: c.activos,
     pasivos: c.pasivos,
     patrimonio: c.patrimonio,
-    liquidez: ratio(ac, pc) ?? 0,
-    endeudamiento: pct(c.pasivos, c.activos) ?? 0,
+    liquidez: liquidity,
+    endeudamiento: pct(c.pasivos, c.activos) ?? undefined,
   };
 
   return [
@@ -553,8 +710,8 @@ export function computeBalanceScenarios(c: ClassifiedTotals): ScenarioRow[] {
       activos: c.activos * 0.95,
       pasivos: c.pasivos * 1.15,
       patrimonio: c.activos * 0.95 - c.pasivos * 1.15,
-      liquidez: ratio(ac * 0.9, pc * 1.2) ?? 0,
-      endeudamiento: pct(c.pasivos * 1.15, c.activos * 0.95) ?? 0,
+      liquidez: liquidity == null ? undefined : ratio(ac * 0.9, pc * 1.2) ?? undefined,
+      endeudamiento: pct(c.pasivos * 1.15, c.activos * 0.95) ?? undefined,
     },
     {
       scenario: "Optimista (+10% activos, −5% pasivos)",
@@ -562,8 +719,8 @@ export function computeBalanceScenarios(c: ClassifiedTotals): ScenarioRow[] {
       activos: c.activos * 1.1,
       pasivos: c.pasivos * 0.95,
       patrimonio: c.activos * 1.1 - c.pasivos * 0.95,
-      liquidez: ratio(ac * 1.1, pc * 0.9) ?? 0,
-      endeudamiento: pct(c.pasivos * 0.95, c.activos * 1.1) ?? 0,
+      liquidez: liquidity == null ? undefined : ratio(ac * 1.1, pc * 0.9) ?? undefined,
+      endeudamiento: pct(c.pasivos * 0.95, c.activos * 1.1) ?? undefined,
     },
     {
       scenario: "Proyección 12 meses (tendencia +3%/mes activos)",
@@ -571,17 +728,25 @@ export function computeBalanceScenarios(c: ClassifiedTotals): ScenarioRow[] {
       activos: c.activos * Math.pow(1.03, 12),
       pasivos: c.pasivos * Math.pow(1.02, 12),
       patrimonio: c.activos * Math.pow(1.03, 12) - c.pasivos * Math.pow(1.02, 12),
-      liquidez: ratio(ac * Math.pow(1.03, 12), pc * Math.pow(1.02, 12)) ?? 0,
-      endeudamiento: pct(c.pasivos * Math.pow(1.02, 12), c.activos * Math.pow(1.03, 12)) ?? 0,
+      liquidez:
+        liquidity == null
+          ? undefined
+          : ratio(ac * Math.pow(1.03, 12), pc * Math.pow(1.02, 12)) ?? undefined,
+      endeudamiento: pct(c.pasivos * Math.pow(1.02, 12), c.activos * Math.pow(1.03, 12)) ?? undefined,
     },
   ];
 }
 
 export function computePnLScenarios(c: ClassifiedTotals): ScenarioRow[] {
-  const utilidad = c.ingresos - c.costos - c.gastos;
+  const baseResult = c.utilidadNeta;
 
-  const mk = (ing: number, cost: number, gast: number): ScenarioRow => {
-    const u = ing - cost - gast;
+  const mk = (ing: number, cost: number, gast: number, result?: number): ScenarioRow => {
+    const u =
+      result ??
+      baseResult +
+        (ing - c.ingresos) -
+        (cost - c.costos) -
+        (gast - c.gastos);
     return {
       scenario: "",
       description: "",
@@ -598,7 +763,7 @@ export function computePnLScenarios(c: ClassifiedTotals): ScenarioRow[] {
       description: "Resultados del documento tal como fue extraído.",
     },
     {
-      ...mk(c.ingresos * 12, c.costos * 12, c.gastos * 12),
+      ...mk(c.ingresos * 12, c.costos * 12, c.gastos * 12, baseResult * 12),
       scenario: "Proyección anual lineal (×12)",
       description: "Extrapolación anual asumiendo el mismo resultado mensual/periódico.",
     },

@@ -25,6 +25,7 @@ function OnboardingPage() {
   const [displayName, setDisplayName] = useState("");
   const [nit, setNit] = useState("");
   const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (loading) return;
@@ -35,26 +36,36 @@ function OnboardingPage() {
   const submit = async () => {
     if (!user || !entity || !sector) return;
     setBusy(true);
+    setSaveError(null);
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("profiles")
         .upsert(
           {
             id: user.id,
+            email: user.email ?? null,
             entity_type: entity,
             sector,
             display_name: displayName || (user.email?.split("@")[0] ?? null),
             nit: nit.trim() || null,
             onboarded: true,
           },
-          { onConflict: "id" }
-        );
+          { onConflict: "id" },
+        )
+        .select("id, onboarded")
+        .maybeSingle();
       if (error) throw error;
+      if (!data?.onboarded) {
+        throw new Error(
+          "No se confirmó el guardado del perfil. Verifica tu sesión y vuelve a intentar.",
+        );
+      }
       await refreshProfile();
       toast.success("Perfil configurado · Bienvenido a la terminal");
-      nav({ to: "/dashboard" });
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Error al guardar");
+      const message = err instanceof Error ? err.message : "Error al guardar el perfil.";
+      setSaveError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -110,10 +121,17 @@ function OnboardingPage() {
               Tipo de Entidad
             </label>
             <div className="mt-2 grid grid-cols-2 gap-3">
-              {([
-                { k: "natural", label: "Persona Natural", icon: User, desc: "RST · Cédulas" },
-                { k: "juridica", label: "Persona Jurídica", icon: Building2, desc: "Régimen Ordinario · Art. 107" },
-              ] as const).map(({ k, label, icon: Icon, desc }) => {
+              {(
+                [
+                  { k: "natural", label: "Persona Natural", icon: User, desc: "RST · Cédulas" },
+                  {
+                    k: "juridica",
+                    label: "Persona Jurídica",
+                    icon: Building2,
+                    desc: "Régimen Ordinario · Art. 107",
+                  },
+                ] as const
+              ).map(({ k, label, icon: Icon, desc }) => {
                 const active = entity === k;
                 return (
                   <button
@@ -168,6 +186,15 @@ function OnboardingPage() {
               })}
             </div>
           </div>
+
+          {saveError && (
+            <div
+              role="alert"
+              className="rounded-md border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-xs text-rose-200"
+            >
+              No se pudo activar la terminal: {saveError}
+            </div>
+          )}
 
           <button
             disabled={!entity || !sector || busy}

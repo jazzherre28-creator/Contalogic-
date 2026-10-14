@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { getAuthRedirectUrl } from "@/lib/auth-redirect";
 import { Mail, Loader2, ArrowLeft, MailCheck } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,7 +21,7 @@ function ForgotPasswordPage() {
     setBusy(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: getAuthRedirectUrl("/reset-password"),
       });
       if (error) throw error;
       setSent(true);

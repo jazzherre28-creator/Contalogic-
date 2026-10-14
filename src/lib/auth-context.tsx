@@ -29,51 +29,120 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
 
-  const loadProfile = async (uid: string) => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", uid)
-      .maybeSingle();
-    setProfile((data as Profile) ?? null);
+  const loadProfile = async (uid: string, email?: string | null) => {
+    const { data, error } = await supabase.from("profiles").select("*").eq("id", uid).maybeSingle();
+    if (error) throw error;
+
+    if (!data) {
+      const { error: createError } = await supabase.from("profiles").upsert(
+        {
+          id: uid,
+          email: email ?? null,
+          onboarded: false,
+        },
+        { onConflict: "id", ignoreDuplicates: true },
+      );
+      if (createError) throw createError;
+
+      const { data: createdProfile, error: reloadError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", uid)
+        .maybeSingle();
+      if (reloadError) throw reloadError;
+      if (!createdProfile) {
+        throw new Error("No se pudo crear o consultar el perfil de usuario.");
+      }
+      setProfile(createdProfile as Profile);
+      return;
+    }
+    setProfile(data as Profile);
   };
 
   useEffect(() => {
-    // 1) listener PRIMERO
+    let active = true;
+    let profileRequest = 0;
+
+    const loadUserProfile = async (nextUser: User | null) => {
+      const request = ++profileRequest;
+      if (!nextUser) {
+        setProfile(null);
+        setProfileLoading(false);
+        return;
+      }
+
+      setProfile(null);
+      setProfileLoading(true);
+      try {
+        await loadProfile(nextUser.id, nextUser.email);
+      } catch (error) {
+        if (active && request === profileRequest) {
+          console.error("No se pudo cargar el perfil de usuario.", error);
+          setProfile(null);
+        }
+      } finally {
+        if (active && request === profileRequest) setProfileLoading(false);
+      }
+    };
+
     const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
       setSession(sess);
       setUser(sess?.user ?? null);
-      if (sess?.user) {
-        // diferir lecturas async para evitar deadlock
-        setTimeout(() => loadProfile(sess.user.id), 0);
-      } else {
-        setProfile(null);
-      }
-      // Recovery flow: forzar redirección a /reset-password
+      setProfile(null);
+      setProfileLoading(Boolean(sess?.user));
+
       if (event === "PASSWORD_RECOVERY" && typeof window !== "undefined") {
         if (window.location.pathname !== "/reset-password") {
           window.location.replace("/reset-password");
         }
       }
-    });
-
-    // 2) sesión inicial
-    supabase.auth.getSession().then(({ data: { session: sess } }) => {
-      setSession(sess);
-      setUser(sess?.user ?? null);
       if (sess?.user) {
-        loadProfile(sess.user.id).finally(() => setLoading(false));
+        setTimeout(() => {
+          if (active) void loadUserProfile(sess.user);
+        }, 0);
       } else {
-        setLoading(false);
+        void loadUserProfile(null);
       }
     });
 
-    return () => sub.subscription.unsubscribe();
+    void supabase.auth
+      .getSession()
+      .then(({ data: { session: sess }, error }) => {
+        if (!active) return;
+        if (error) throw error;
+        setSession(sess);
+        setUser(sess?.user ?? null);
+        void loadUserProfile(sess?.user ?? null);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        console.error("No se pudo restaurar la sesión.", error);
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setProfileLoading(false);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+      profileRequest += 1;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const refreshProfile = async () => {
-    if (user) await loadProfile(user.id);
+    if (!user) throw new Error("Debes iniciar sesión para guardar el perfil.");
+    setProfileLoading(true);
+    try {
+      await loadProfile(user.id, user.email);
+    } finally {
+      setProfileLoading(false);
+    }
   };
 
   const signOut = async () => {
@@ -83,7 +152,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, session, profile, loading, refreshProfile, signOut }}
+      value={{
+        user,
+        session,
+        profile,
+        loading: loading || profileLoading,
+        refreshProfile,
+        signOut,
+      }}
     >
       {children}
     </AuthContext.Provider>

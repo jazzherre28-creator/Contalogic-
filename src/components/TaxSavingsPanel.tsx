@@ -36,10 +36,10 @@ export function TaxSavingsPanel({
           </div>
           <div>
             <div className="font-mono text-[10px] uppercase tracking-widest text-emerald-glow">
-              Ahorro fiscal estimado
+              Oportunidades a validar
             </div>
             <div className="text-xl font-bold text-slate-100">
-              {totalSaving > 0 ? fmtCOP(totalSaving) : "Personaliza con tu documento"}
+              {totalSaving > 0 ? fmtCOP(totalSaving) : "No cuantificable con solo estados financieros"}
             </div>
           </div>
         </div>

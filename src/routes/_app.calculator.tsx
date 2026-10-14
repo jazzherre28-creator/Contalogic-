@@ -3,13 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { CATEGORIES, SECTOR_LABEL } from "@/lib/sectors";
-import { Calculator, Plus, Minus, Trash2, History, FileDown, FileSpreadsheet, BarChart3, ScanLine, Download } from "lucide-react";
+import { Calculator, Plus, Minus, Trash2, History, FileDown, FileSpreadsheet, BarChart3, ScanLine, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { generateCalculatorReport } from "@/lib/pdf-report";
 import { exportCalculatorXLSX } from "@/lib/excel-report";
 import { CalculatorConsole } from "@/components/CalculatorConsole";
-import { useFinance } from "@/lib/finance-context";
-import { ocrParsedToRecords, type FinanceRecord } from "@/lib/unified-finance";
+import { TransportTripCalculator } from "@/components/TransportTripCalculator";
+import type { FinanceRecord } from "@/lib/unified-finance";
 import { Link } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_app/calculator")({
@@ -23,7 +23,29 @@ type Rec = {
   category: string;
   note: string | null;
   recorded_at: string;
+  source: "manual" | "ocr" | "legacy";
 };
+
+async function loadRecordsBySource(
+  userId: string,
+  source: Rec["source"],
+): Promise<Rec[]> {
+  const pageSize = 1000;
+  const records: Rec[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("financial_records")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("source", source)
+      .order("recorded_at", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as Rec[];
+    records.push(...page);
+    if (page.length < pageSize) return records;
+  }
+}
 
 function CalculatorPage() {
   const { user, profile } = useAuth();
@@ -36,20 +58,17 @@ function CalculatorPage() {
   const [note, setNote] = useState("");
   const [history, setHistory] = useState<Rec[]>([]);
   const [allRecords, setAllRecords] = useState<Rec[]>([]);
+  const [legacyRecords, setLegacyRecords] = useState<Rec[]>([]);
+  const [ocrImportedRecords, setOcrImportedRecords] = useState<Rec[]>([]);
   const [ocrDocs, setOcrDocs] = useState<
     Array<{
       id: string;
       doc_type: "balance" | "pnl";
       file_name: string | null;
       created_at: string;
-      parsed_data: {
-        totals?: Record<string, number>;
-        lineItems?: Array<{ label: string; value: number }>;
-      } | null;
     }>
   >([]);
   const [busy, setBusy] = useState(false);
-  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     if (!activeKey && cats[0]) setActiveKey(cats[0].key);
@@ -57,31 +76,38 @@ function CalculatorPage() {
 
   const loadHistory = async () => {
     if (!user) return;
-    const [{ data: recent }, { data: all }, { data: ocr }] = await Promise.all([
-      supabase
-        .from("financial_records")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("recorded_at", { ascending: false })
-        .limit(15),
-      supabase
-        .from("financial_records")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("recorded_at", { ascending: true }),
-      supabase
-        .from("ocr_documents")
-        .select("id, doc_type, file_name, created_at, parsed_data")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false })
-        .limit(5),
-    ]);
-    setHistory((recent ?? []) as Rec[]);
-    setAllRecords((all ?? []) as Rec[]);
-    setOcrDocs((ocr ?? []) as typeof ocrDocs);
+    try {
+      const [recentResult, allRecordsResult, legacyRecordsResult, ocrRecordsResult, ocrResult] = await Promise.all([
+        supabase
+          .from("financial_records")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("source", "manual")
+          .order("recorded_at", { ascending: false })
+          .limit(15),
+        loadRecordsBySource(user.id, "manual"),
+        loadRecordsBySource(user.id, "legacy"),
+        loadRecordsBySource(user.id, "ocr"),
+        supabase
+          .from("ocr_documents")
+          .select("id, doc_type, file_name, created_at")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(5),
+      ]);
+      const failed = [recentResult, ocrResult].find((result) => result.error);
+      if (failed?.error) throw failed.error;
+      setHistory((recentResult.data ?? []) as Rec[]);
+      setAllRecords(allRecordsResult);
+      setLegacyRecords(legacyRecordsResult);
+      setOcrImportedRecords(ocrRecordsResult);
+      setOcrDocs((ocrResult.data ?? []) as typeof ocrDocs);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Error al cargar los movimientos");
+    }
   };
   useEffect(() => {
-    loadHistory();
+    void loadHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -112,6 +138,7 @@ function CalculatorPage() {
         amount,
         kind: activeCat.kind,
         note: note || null,
+        source: "manual",
       });
       if (error) throw error;
       toast.success(
@@ -119,7 +146,7 @@ function CalculatorPage() {
       );
       setDisplay("0");
       setNote("");
-      loadHistory();
+      await loadHistory();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Error al guardar");
     } finally {
@@ -128,8 +155,19 @@ function CalculatorPage() {
   };
 
   const remove = async (id: string) => {
-    await supabase.from("financial_records").delete().eq("id", id);
-    loadHistory();
+    if (!user) return;
+    try {
+      const { error } = await supabase
+        .from("financial_records")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", user.id)
+        .eq("source", "manual");
+      if (error) throw error;
+      await loadHistory();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Error al eliminar el movimiento");
+    }
   };
 
   const fmt = (n: number) =>
@@ -152,87 +190,44 @@ function CalculatorPage() {
     [allRecords]
   );
 
-  const ocrFinance: FinanceRecord[] = useMemo(() => {
-    const out: FinanceRecord[] = [];
-    for (const doc of ocrDocs) {
-      const parsed = doc.parsed_data ?? {};
-      if (!parsed.totals && !parsed.lineItems?.length) continue;
-      out.push(
-        ...ocrParsedToRecords(
-          { totals: parsed.totals, lineItems: parsed.lineItems },
-          {
-            fileName: doc.file_name ?? undefined,
-            docType: doc.doc_type,
-            scannedAt: doc.created_at,
-          }
-        )
-      );
-    }
-    return out;
-  }, [ocrDocs]);
-
-  const latestOcr = ocrDocs[0];
-  const latestOcrTotals = latestOcr?.parsed_data?.totals ?? {};
-
-  const importOcrToCalculator = async () => {
-    if (!user || ocrFinance.length === 0) return;
-    setImporting(true);
-    try {
-      const rows = ocrFinance.map((r) => ({
-        user_id: user.id,
-        category: r.category.replace(/^\[OCR\]\s*/, ""),
-        amount: r.amount,
-        kind: r.kind,
-        note: r.note ?? "Importado desde OCR",
-      }));
-      const { error } = await supabase.from("financial_records").insert(rows);
-      if (error) throw error;
-      toast.success(`${rows.length} partidas del escaneo importadas a movimientos`);
-      loadHistory();
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Error al importar");
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const { limpiar } = useFinance();
-
-  const clearUiOnly = () => {
-    // Limpiar estado UI: calculadora local y estado OCR mostrado
-    setDisplay("0");
-    setNote("");
-    setHistory([]);
-    setAllRecords([]);
-    setOcrDocs([]);
-    // limpiar contexto global OCR
-    try {
-      limpiar();
-      toast.success("Interfaz limpiada: OCR y calculadora (UI)");
-    } catch (e) {
-      console.error(e);
-      toast.error("Error al limpiar la interfaz");
-    }
-  };
-
-  const deleteAllFromDb = async () => {
+  const classifyLegacyRecord = async (id: string, source: "manual" | "ocr") => {
     if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from("financial_records")
+        .update({ source })
+        .eq("id", id)
+        .eq("user_id", user.id)
+        .eq("source", "legacy")
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("El registro ya fue clasificado o no está disponible.");
+      toast.success(source === "manual" ? "Registro incluido en análisis manual" : "Registro separado como origen OCR");
+      await loadHistory();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "No se pudo clasificar el registro");
+    }
+  };
+
+  const deleteManualRecords = async () => {
+    if (!user || allRecords.length === 0) return;
     const ok = window.confirm(
-      "Esta acción eliminará TODOS los registros de la calculadora y los documentos OCR del usuario en la base de datos. ¿Deseas continuar?"
+      `Se eliminarán ${allRecords.length} movimientos manuales. Los documentos OCR y los registros sin origen confirmado se conservarán. ¿Deseas continuar?`
     );
     if (!ok) return;
     try {
-      // Borrar registros financieros
-      await supabase.from("financial_records").delete().eq("user_id", user.id);
-      // Borrar documentos OCR (parcialmente destructivo)
-      await supabase.from("ocr_documents").delete().eq("user_id", user.id);
-      toast.success("Registros y documentos OCR borrados en la base de datos");
-      // Recargar y limpiar UI
-      loadHistory();
-      limpiar();
+      const { error } = await supabase
+        .from("financial_records")
+        .delete()
+        .eq("user_id", user.id)
+        .eq("source", "manual");
+      if (error) throw error;
+      toast.success("Movimientos manuales eliminados; documentos OCR conservados");
+      await loadHistory();
     } catch (err: unknown) {
       console.error(err);
-      toast.error("Error al borrar registros en la base de datos");
+      toast.error(err instanceof Error ? err.message : "Error al borrar movimientos manuales");
     }
   };
 
@@ -343,21 +338,14 @@ function CalculatorPage() {
           </div>
           <div className="flex items-center gap-1.5">
           <button
-            onClick={async () => {
-              if (!user) return;
-              const { data } = await supabase
-                .from("financial_records")
-                .select("*")
-                .eq("user_id", user.id)
-                .order("recorded_at", { ascending: false });
-              const recs = (data ?? []) as Rec[];
-              if (recs.length === 0) {
+            onClick={() => {
+              if (allRecords.length === 0) {
                 toast.error("Sin movimientos para reportar");
                 return;
               }
               generateCalculatorReport({
                 profile: profile ?? {},
-                records: recs.map((r) => ({
+                records: allRecords.map((r) => ({
                   category: r.category,
                   amount: Number(r.amount),
                   kind: r.kind,
@@ -367,25 +355,19 @@ function CalculatorPage() {
               });
               toast.success("Reporte PDF generado");
             }}
+            disabled={allRecords.length === 0}
             className="inline-flex items-center gap-1.5 rounded-md border border-[oklch(0.92_0.2_105/0.5)] bg-[oklch(0.92_0.2_105/0.1)] px-2.5 py-1 text-[11px] font-semibold text-emerald-glow transition hover:bg-[oklch(0.92_0.2_105/0.2)]"
           >
             <FileDown className="h-3 w-3" /> PDF
           </button>
           <button
-            onClick={async () => {
-              if (!user) return;
-              const { data } = await supabase
-                .from("financial_records")
-                .select("*")
-                .eq("user_id", user.id)
-                .order("recorded_at", { ascending: false });
-              const recs = (data ?? []) as Rec[];
-              if (recs.length === 0) {
+            onClick={() => {
+              if (allRecords.length === 0) {
                 toast.error("Sin movimientos para exportar");
                 return;
               }
               exportCalculatorXLSX({
-                records: recs.map((r) => ({
+                records: allRecords.map((r) => ({
                   category: r.category,
                   amount: Number(r.amount),
                   kind: r.kind,
@@ -395,6 +377,7 @@ function CalculatorPage() {
               });
               toast.success("Excel generado");
             }}
+            disabled={allRecords.length === 0}
             className="inline-flex items-center gap-1.5 rounded-md border border-[oklch(0.7_0.22_245/0.5)] bg-[oklch(0.7_0.22_245/0.1)] px-2.5 py-1 text-[11px] font-semibold text-neon transition hover:bg-[oklch(0.7_0.22_245/0.2)]"
           >
             <FileSpreadsheet className="h-3 w-3" /> Excel
@@ -439,69 +422,125 @@ function CalculatorPage() {
         )}
       </div>
 
-      {(allRecords.length > 0 || ocrFinance.length > 0) && (
-        <div className="glass p-5 lg:col-span-2">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4 text-emerald-glow" />
-              <h3 className="text-sm font-semibold">Consola · Flujo de caja y análisis</h3>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {ocrFinance.length > 0 && (
-                <button
-                  onClick={importOcrToCalculator}
-                  disabled={importing}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-glow transition hover:bg-emerald-500/20 disabled:opacity-60"
-                >
-                  <Download className="h-3 w-3" />
-                  {importing ? "Importando…" : `Importar ${ocrFinance.length} partidas OCR`}
-                </button>
-              )}
-              {ocrDocs.length === 0 && (
-                <Link
-                  to="/scanner"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-neon/40 bg-neon/10 px-2.5 py-1 text-[11px] font-semibold text-neon transition hover:bg-neon/20"
-                >
-                  <ScanLine className="h-3 w-3" /> Escanear documento
-                </Link>
-              )}
+      <div className="glass space-y-4 p-5 lg:col-span-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-emerald-glow" />
+            <div>
+              <h3 className="text-sm font-semibold">Análisis de movimientos manuales</h3>
+              <p className="text-xs text-muted-foreground">
+                Solo incluye registros capturados en esta calculadora; OCR y origen pendiente quedan fuera.
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => clearUiOnly()}
-              className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/6 px-2.5 py-1 text-[11px] font-semibold text-amber-400 transition hover:bg-amber-500/12"
+              onClick={() => void loadHistory()}
+              className="inline-flex items-center gap-1.5 rounded-md border border-white/15 px-2.5 py-1 text-[11px] font-semibold text-slate-300 transition hover:bg-white/5"
             >
-              Limpiar UI
+              <RefreshCw className="h-3 w-3" /> Actualizar
             </button>
             <button
-              onClick={() => deleteAllFromDb()}
-              className="inline-flex items-center gap-1.5 rounded-md border border-rose-500/40 bg-rose-500/6 px-2.5 py-1 text-[11px] font-semibold text-rose-400 transition hover:bg-rose-500/12"
+              onClick={() => void deleteManualRecords()}
+              disabled={allRecords.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-md border border-rose-500/40 bg-rose-500/6 px-2.5 py-1 text-[11px] font-semibold text-rose-400 transition hover:bg-rose-500/12 disabled:opacity-40"
             >
-              Borrar DB
+              Borrar movimientos manuales
             </button>
           </div>
-          <CalculatorConsole
-            manualRecords={manualFinance}
-            ocrRecords={ocrFinance}
-            ocrTotals={latestOcrTotals}
-            ocrDocLabel={latestOcr?.file_name ?? undefined}
-          />
         </div>
+        <CalculatorConsole manualRecords={manualFinance} />
+      </div>
+
+        {profile?.sector === "transporte" && user && (
+          <TransportTripCalculator userId={user.id} />
+        )}
+
+        {legacyRecords.length > 0 && (
+        <section className="glass space-y-3 p-5 lg:col-span-2">
+          <div>
+            <h3 className="text-sm font-semibold text-amber-300">
+              Registros antiguos sin origen confirmado ({legacyRecords.length})
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Se excluyen de los indicadores y reportes para evitar mezclar movimientos manuales con importaciones OCR.
+              Confirma el origen de cada registro antes de incluirlo.
+            </p>
+          </div>
+          <ul className="space-y-2">
+            {legacyRecords.map((record) => (
+              <li key={record.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/15 bg-amber-500/[0.03] px-3 py-2">
+                <div>
+                  <div className="text-sm font-medium">{record.category} · {fmt(record.amount)}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {record.kind === "income" ? "Ingreso" : "Egreso"} · {new Date(record.recorded_at).toLocaleString("es-CO")}
+                    {record.note ? ` · ${record.note}` : ""}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => void classifyLegacyRecord(record.id, "manual")}
+                    className="rounded-md border border-emerald-500/35 px-2.5 py-1 text-[10px] font-semibold text-emerald-300 hover:bg-emerald-500/10"
+                  >
+                    Confirmar manual
+                  </button>
+                  <button
+                    onClick={() => void classifyLegacyRecord(record.id, "ocr")}
+                    className="rounded-md border border-neon/35 px-2.5 py-1 text-[10px] font-semibold text-neon hover:bg-neon/10"
+                  >
+                    Marcar OCR
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
-      {allRecords.length === 0 && ocrFinance.length === 0 && (
-        <div className="glass p-6 text-center lg:col-span-2">
-          <BarChart3 className="mx-auto h-8 w-8 text-muted-foreground opacity-50" />
-          <p className="mt-2 text-sm text-muted-foreground">
-            Registra movimientos o{" "}
-            <Link to="/scanner" className="text-neon hover:underline">
-              escanea un Balance o P&L
-            </Link>{" "}
-            para activar la consola de flujo de caja.
+      {ocrImportedRecords.length > 0 && (
+        <section className="glass p-5 lg:col-span-2">
+          <h3 className="text-sm font-semibold text-neon">
+            Partidas OCR separadas ({ocrImportedRecords.length})
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Estas partidas se conservan fuera del flujo de caja manual. Consulta el documento y su análisis en el escáner.
           </p>
-        </div>
+        </section>
       )}
+
+      <section className="glass p-5 lg:col-span-2">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-neon">Documentos OCR · análisis independiente</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Los saldos y subtotales del balance/P&amp;L no se convierten en movimientos de caja.
+            </p>
+          </div>
+          <Link
+            to="/scanner"
+            className="inline-flex items-center gap-1.5 rounded-md border border-neon/40 bg-neon/10 px-2.5 py-1 text-[11px] font-semibold text-neon transition hover:bg-neon/20"
+          >
+            <ScanLine className="h-3 w-3" /> Abrir escáner OCR
+          </Link>
+        </div>
+        {ocrDocs.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No hay documentos OCR recientes.</p>
+        ) : (
+          <ul className="space-y-2">
+            {ocrDocs.map((doc) => (
+              <li key={doc.id} className="flex items-center justify-between gap-3 rounded-md border border-white/5 bg-white/[0.02] px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{doc.file_name ?? "Documento sin nombre"}</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    {doc.doc_type === "balance" ? "Estado de situación financiera" : "Estado de resultados"} · {new Date(doc.created_at).toLocaleString("es-CO")}
+                  </div>
+                </div>
+                <span className="shrink-0 rounded border border-neon/20 px-2 py-0.5 text-[9px] font-mono uppercase text-neon">OCR</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

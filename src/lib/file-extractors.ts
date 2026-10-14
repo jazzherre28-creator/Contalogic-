@@ -9,7 +9,13 @@ export type ExtractResult = {
   lineItems: LineItem[];
   pages?: number;
   sheetSummary?: Array<{ sheet: string; rows: number }>;
-  meta?: { entryCount?: number; charCount?: number; source: string };
+  meta?: {
+    entryCount?: number;
+    charCount?: number;
+    source: string;
+    unitLabel?: string;
+    unitMultiplier?: number;
+  };
 };
 
 const AMOUNT_RE = /[-(]?\$?\s?[\d]{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{1,2})?\)?|[-(]?\$?\s?[\d]+(?:[.,]\d+)?\)?/g;
@@ -275,9 +281,17 @@ export function lineItemsToTotals(items: LineItem[]): Record<string, number> {
 
 export type ProgressFn = (pct: number, msg?: string) => void;
 
-function buildResult(text: string, extra: Partial<ExtractResult> = {}, extraItems: LineItem[] = []): ExtractResult {
-  const parsed = parseLineItems(text);
-  const lineItems = mergeUniqueLineItems(parsed, extraItems);
+function buildResult(
+  text: string,
+  extra: Partial<ExtractResult> = {},
+  extraItems: LineItem[] = [],
+  options: { structuredOnly?: boolean; unitMultiplier?: number; unitLabel?: string } = {}
+): ExtractResult {
+  const parsed = options.structuredOnly ? [] : parseLineItems(text);
+  const lineItems = mergeUniqueLineItems(parsed, extraItems).map((item) => ({
+    ...item,
+    value: item.value * (options.unitMultiplier ?? 1),
+  }));
   const totals = lineItemsToTotals(lineItems);
   return {
     ...extra,
@@ -289,8 +303,70 @@ function buildResult(text: string, extra: Partial<ExtractResult> = {}, extraItem
       entryCount: Object.keys(totals).length,
       charCount: text.length,
       source: extra.meta?.source ?? "text",
+      ...(options.unitMultiplier && options.unitMultiplier !== 1
+        ? { unitLabel: options.unitLabel, unitMultiplier: options.unitMultiplier }
+        : {}),
     },
   };
+}
+
+type PdfTextRow = { text: string; cells: Array<{ text: string; x: number }> };
+
+function getPdfTextRows(items: Array<{ str?: string; transform?: number[] }>): PdfTextRow[] {
+  const rows: Array<{ y: number; cells: Array<{ text: string; x: number }> }> = [];
+  for (const item of items) {
+    const text = item.str?.trim();
+    if (!text) continue;
+    const x = item.transform?.[4] ?? 0;
+    const y = item.transform?.[5] ?? 0;
+    let row = rows.find((candidate) => Math.abs(candidate.y - y) < 2.5);
+    if (!row) {
+      row = { y, cells: [] };
+      rows.push(row);
+    }
+    row.cells.push({ text, x });
+  }
+
+  return rows
+    .sort((a, b) => b.y - a.y)
+    .map(({ cells }) => {
+      const sortedCells = cells.sort((a, b) => a.x - b.x);
+      return {
+        cells: sortedCells,
+        text: sortedCells.map((cell) => cell.text).join("\t"),
+      };
+    });
+}
+
+function parsePdfFinancialRows(rows: PdfTextRow[]): LineItem[] {
+  const items: LineItem[] = [];
+  for (const row of rows) {
+    const amountCells = row.cells.filter(
+      ({ text, x }) => x >= 250 && !text.includes("%") && /^[-+]?\(?\$?\s*\d[\d.,\s]*\)?$/.test(text)
+    );
+    if (amountCells.length === 0) continue;
+    const firstAmount = amountCells[0];
+    const label = row.cells
+      .filter((cell) => cell.x < Math.min(firstAmount.x, 250) && !/^[-+]?\(?\$?\s*\d[\d.,\s]*\)?$/.test(cell.text))
+      .map((cell) => cell.text)
+      .join(" ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    if (!label || label.length < 3) continue;
+
+    const value = cleanNumericValue(firstAmount.text);
+    if (!Number.isFinite(value)) continue;
+    items.push({ label, value });
+  }
+  return items;
+}
+
+export function parsePdfFinancialItems(
+  items: Array<{ str?: string; transform?: number[] }>
+): LineItem[] {
+  return parsePdfFinancialRows(
+    getPdfTextRows(items)
+  );
 }
 
 async function ocrPdfPages(
@@ -356,44 +432,52 @@ async function extractPdf(file: File, onProgress?: ProgressFn): Promise<ExtractR
   const buf = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({ data: buf }).promise;
   let text = "";
+  const structuredItems: LineItem[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const pageText = content.items
-      .map((it: unknown) => (it as { str?: string }).str ?? "")
-      .join(" ");
-    text += pageText + "\n";
+    const rows = getPdfTextRows(
+      content.items as Array<{ str?: string; transform?: number[] }>
+    );
+    text += `${rows.map((row) => row.text).join("\n")}\n`;
+    structuredItems.push(
+      ...parsePdfFinancialRows(rows)
+    );
     onProgress?.(Math.round((i / pdf.numPages) * 80), `Página ${i}/${pdf.numPages}`);
   }
 
   const numericMatches = text.match(/[\d]{3,}/g) ?? [];
   const isScanned = text.trim().length < 120 || numericMatches.length < 6;
-
-  let ocrText = "";
-
-  // OCR completo: escaneados o pocos datos extraídos del texto nativo
-  const textOnlyResult = buildResult(text, {}, []);
-  const needsOcr = isScanned || textOnlyResult.meta!.entryCount! < 12;
+  const needsOcr = isScanned || structuredItems.length < 8;
 
   let combinedText = text;
+  let extractedItems = structuredItems;
+  let usedOcr = false;
   if (needsOcr && pdf.numPages > 0) {
     onProgress?.(82, isScanned ? "PDF escaneado · OCR profundo" : "Complementando con OCR");
-    ocrText = await ocrPdfPages(pdf, onProgress, 82);
-
+    const ocrText = await ocrPdfPages(pdf, onProgress, 82);
+    usedOcr = true;
     const scanned = looksLikeScannedText(text);
     if (scanned) {
       combinedText = ocrText;
+      extractedItems = [];
     } else {
       combinedText = [text, ocrText].filter(Boolean).join("\n");
     }
   }
 
+  const hasThousandsOfCOP =
+    /\b(miles?\s+de\s+pesos|miles?\s+cop|cifras?\s+en\s+miles)\b/i.test(combinedText);
   onProgress?.(100, "Listo");
   return buildResult(combinedText, {
     pages: pdf.numPages,
     meta: {
-      source: isScanned ? "ocr-pdf" : ocrText ? "pdf-hybrid" : "pdf-text",
+      source: isScanned ? "ocr-pdf" : usedOcr ? "pdf-hybrid" : "pdf-text",
     },
+  }, extractedItems, {
+    structuredOnly: extractedItems.length >= 8,
+    unitMultiplier: hasThousandsOfCOP ? 1000 : 1,
+    unitLabel: hasThousandsOfCOP ? "COP (fuente expresada en miles de pesos)" : undefined,
   });
 }
 

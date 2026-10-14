@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useFinance } from "@/lib/finance-context";
+import type { ReportProfile } from "@/lib/pdf-report";
 import {
   BarChart,
   Bar,
@@ -22,7 +23,6 @@ import {
   ComposedChart,
   Area,
 } from "recharts";
-import type { ReportProfile } from "@/lib/pdf-report";
 import {
   classifyTotals,
   dataQualityScore,
@@ -40,8 +40,12 @@ const COLORS = ["#2563eb", "#10b981", "#eab308", "#ef4444", "#a855f7", "#0ea5e9"
 const fmt = (n: number) =>
   new Intl.NumberFormat("es-CO", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 
-const fmtCOP = (n: number) =>
-  new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n);
+const fmtCOP = (n: number | null) =>
+  n == null
+    ? "N/D"
+    : new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n);
+
+const fmtPercent = (n: number | null) => (n == null ? "N/D" : `${n.toFixed(1)}%`);
 
 const tooltipStyle = { background: "#0a0a14", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8 };
 
@@ -49,7 +53,6 @@ export type ProjectionRow = { concept: string; base: string; rate: string; value
 
 export function computeAdvancedAnalytics(
   totals: Record<string, number>,
-  profile: ReportProfile,
   docType: "balance" | "pnl" = "pnl"
 ) {
   const entries = Object.entries(totals).filter(([, v]) => v !== 0);
@@ -69,30 +72,30 @@ export function computeAdvancedAnalytics(
     otherEntries,
   } = c;
 
-  const utilidadBruta = Math.max(0, ingresos - costos);
-  const utilidadNeta = ingresos - costos - gastos;
-  const margenBruto = ingresos > 0 ? (utilidadBruta / ingresos) * 100 : 0;
-  const margenNeto = ingresos > 0 ? (utilidadNeta / ingresos) * 100 : 0;
-  const liquidez = pasivos > 0 ? activos / pasivos : 0;
-  const endeudamiento = activos > 0 ? (pasivos / activos) * 100 : 0;
-  const equidadRatio = activos > 0 ? (patrimonio / activos) * 100 : 0;
-  const capitalTrabajo = activosCorrientes - pasivosCorrientes;
-  const liquidezCorriente = pasivosCorrientes > 0 ? activosCorrientes / pasivosCorrientes : 0;
-  const costRatio = ingresos > 0 ? (costos / ingresos) * 100 : 0;
-  const expenseRatio = ingresos > 0 ? (gastos / ingresos) * 100 : 0;
+  const utilidadBruta = c.hasGrossProfit ? c.utilidadBruta : null;
+  const utilidadNeta = c.hasNetIncome ? c.utilidadNeta : null;
+  const margenBruto = c.hasGrossProfit && ingresos > 0 ? (c.utilidadBruta / ingresos) * 100 : null;
+  const margenNeto = c.hasNetIncome && ingresos > 0 ? (c.utilidadNeta / ingresos) * 100 : null;
+  const liquidez = c.hasTotalAssets && c.hasTotalLiabilities && pasivos > 0 ? activos / pasivos : null;
+  const endeudamiento =
+    c.hasTotalAssets && c.hasTotalLiabilities && activos > 0 ? (pasivos / activos) * 100 : null;
+  const equidadRatio = c.hasEquity && c.hasTotalAssets && activos > 0 ? (patrimonio / activos) * 100 : null;
+  const capitalTrabajo =
+    c.hasCurrentAssets && c.hasCurrentLiabilities ? activosCorrientes - pasivosCorrientes : null;
+  const liquidezCorriente =
+    c.hasCurrentAssets && c.hasCurrentLiabilities && pasivosCorrientes > 0
+      ? activosCorrientes / pasivosCorrientes
+      : null;
+  const costRatio = ingresos > 0 && costEntries.length > 0 ? (costos / ingresos) * 100 : null;
+  const expenseRatio = ingresos > 0 && expenseEntries.length > 0 ? (gastos / ingresos) * 100 : null;
 
-  const isJuridica = profile.entity_type === "juridica";
-  const tarifaRenta = isJuridica ? 0.35 : 0.19;
-  const ivaGenerado = ingresos * 0.19;
-  const ivaDescontable = (costos + gastos) * 0.5 * 0.19;
-  const ivaNeto = Math.max(0, ivaGenerado - ivaDescontable);
-  const rentaEstimada = Math.max(0, utilidadNeta) * tarifaRenta;
-  const ica = ingresos * 0.00966;
-  const totalImpuestos = ivaNeto + rentaEstimada + ica;
-  const impuestoRatio = ingresos > 0 ? (totalImpuestos / ingresos) * 100 : 0;
-  const ahorroIVA = ivaDescontable;
-  const ahorroDeducc = Math.max(0, gastos * 0.08) * tarifaRenta;
-  const ahorroRST = isJuridica ? 0 : Math.max(0, rentaEstimada - ingresos * 0.055);
+  const ivaGenerado = 0;
+  const ivaDescontable = 0;
+  const ivaNeto = 0;
+  const impuestoRentaReportado = c.hasIncomeTax ? c.impuestoRenta : 0;
+  const ica = 0;
+  const impuestoRatio =
+    c.hasIncomeTax && ingresos > 0 ? (c.impuestoRenta / ingresos) * 100 : null;
   const quality = dataQualityScore(entries.length);
 
   const formattedCostDetails = costEntries
@@ -113,22 +116,34 @@ export function computeAdvancedAnalytics(
     });
 
   const projection: ProjectionRow[] = [
-    { concept: "IVA generado (Art. 420 ET)", base: fmtCOP(ingresos), rate: "19%", value: fmtCOP(ivaGenerado), valueNum: ivaGenerado },
-    { concept: "IVA descontable (Art. 485 ET)", base: fmtCOP((costos + gastos) * 0.5), rate: "19%", value: fmtCOP(ivaDescontable), valueNum: ivaDescontable },
-    { concept: "IVA neto a pagar", base: "—", rate: "—", value: fmtCOP(ivaNeto), valueNum: ivaNeto },
-    { concept: `Renta (${isJuridica ? "Art. 240 ET 35%" : "cedular 19%"})`, base: fmtCOP(Math.max(0, utilidadNeta)), rate: isJuridica ? "35%" : "19%", value: fmtCOP(rentaEstimada), valueNum: rentaEstimada },
-    { concept: "ICA servicios (9.66x1000)", base: fmtCOP(ingresos), rate: "0.966%", value: fmtCOP(ica), valueNum: ica },
-    { concept: "Total carga tributaria estimada", base: "—", rate: "—", value: fmtCOP(totalImpuestos), valueNum: totalImpuestos },
+    { concept: "IVA generado", base: "N/D · requiere ventas gravadas", rate: "N/D", value: "N/D", valueNum: ivaGenerado },
+    { concept: "IVA descontable", base: "N/D · requiere facturas", rate: "N/D", value: "N/D", valueNum: ivaDescontable },
+    { concept: "IVA neto a pagar", base: "N/D · requiere declaración", rate: "N/D", value: "N/D", valueNum: ivaNeto },
+    {
+      concept: c.hasIncomeTax ? "Impuesto de renta reportado" : "Impuesto de renta",
+      base: c.hasProfitBeforeTax ? fmtCOP(c.utilidadAntesImpuestos) : "N/D",
+      rate: c.hasIncomeTax ? "Según documento" : "N/D",
+      value: c.hasIncomeTax ? fmtCOP(impuestoRentaReportado) : "N/D",
+      valueNum: impuestoRentaReportado,
+    },
+    { concept: "ICA", base: "N/D · requiere municipio y actividad", rate: "N/D", value: "N/D", valueNum: ica },
+    {
+      concept: "Total de tributos",
+      base: "No determinable con estos estados",
+      rate: "—",
+      value: "N/D",
+      valueNum: 0,
+    },
   ];
 
-  const savings = [
-    { name: "IVA descontable", value: ahorroIVA },
-    { name: "Deducciones Art. 107", value: ahorroDeducc },
-    { name: "Optimización RST", value: Math.max(0, ahorroRST) },
-  ].filter((s) => s.value > 0);
+  const savings: Array<{ name: string; value: number }> = [];
 
   const marginWaterfall =
-    docType === "pnl" && ingresos > 0
+    docType === "pnl" &&
+    ingresos > 0 &&
+    utilidadNeta != null &&
+    costEntries.length > 0 &&
+    expenseEntries.length > 0
       ? [
           { name: "Ingresos", value: ingresos, fill: "#10b981" },
           { name: "Costos", value: -costos, fill: "#ef4444" },
@@ -138,25 +153,27 @@ export function computeAdvancedAnalytics(
       : [];
 
   const balanceRadar = [
-    { name: "Activos", value: activos },
-    { name: "Pasivos", value: pasivos },
-    { name: "Patrimonio", value: patrimonio },
+    ...(c.hasTotalAssets ? [{ name: "Activos", value: activos }] : []),
+    ...(c.hasTotalLiabilities ? [{ name: "Pasivos", value: pasivos }] : []),
+    ...(c.hasEquity ? [{ name: "Patrimonio", value: patrimonio }] : []),
   ];
 
   const chartInsights =
     docType === "balance"
       ? [
-          `Activos: ${fmtCOP(activos)} · Pasivos: ${fmtCOP(pasivos)} · Patrimonio: ${fmtCOP(patrimonio)}.`,
-          `Liquidez A/P: ${liquidez.toFixed(2)}x · Endeudamiento: ${endeudamiento.toFixed(1)}% · Capital de trabajo: ${fmtCOP(capitalTrabajo)}.`,
-          pasivosCorrientes > 0
-            ? `Liquidez corriente: ${liquidezCorriente.toFixed(2)}x (activos corrientes / pasivos corrientes).`
-            : "No se detectaron pasivos corrientes con claridad.",
+          `Activos: ${fmtCOP(c.hasTotalAssets ? activos : null)} · Pasivos: ${fmtCOP(c.hasTotalLiabilities ? pasivos : null)} · Patrimonio: ${fmtCOP(c.hasEquity ? patrimonio : null)}.`,
+          `Liquidez A/P: ${liquidez == null ? "N/D" : `${liquidez.toFixed(2)}x`} · Endeudamiento: ${endeudamiento == null ? "N/D" : `${endeudamiento.toFixed(1)}%`} · Capital de trabajo: ${fmtCOP(capitalTrabajo)}.`,
+          c.hasCurrentAssets && c.hasCurrentLiabilities
+            ? `Liquidez corriente: ${liquidezCorriente == null ? "N/D" : `${liquidezCorriente.toFixed(2)}x`} (activos corrientes / pasivos corrientes).`
+            : "No se pueden calcular ratios corrientes: faltan subtotales de activos o pasivos corrientes.",
           quality.insight,
         ]
       : [
-          `Ingresos: ${fmtCOP(ingresos)} · Costos: ${fmtCOP(costos)} · Gastos: ${fmtCOP(gastos)}.`,
-          `Utilidad bruta ${margenBruto.toFixed(1)}% · Utilidad neta ${margenNeto.toFixed(1)}%.`,
-          `Carga tributaria estimada: ${fmtCOP(totalImpuestos)} (${impuestoRatio.toFixed(1)}% sobre ingresos).`,
+          `Ingresos: ${fmtCOP(c.ingresosEntries.length > 0 ? ingresos : null)} · Costos: ${fmtCOP(costEntries.length > 0 ? costos : null)} · Gastos: ${fmtCOP(expenseEntries.length > 0 ? gastos : null)}.`,
+          `Margen bruto ${fmtPercent(margenBruto)} · Margen neto ${fmtPercent(margenNeto)}.`,
+          c.hasIncomeTax
+            ? `Impuesto de renta reportado: ${fmtCOP(impuestoRentaReportado)} (${fmtPercent(impuestoRatio)} sobre ingresos). IVA e ICA no se estiman sin soportes y datos de jurisdicción.`
+            : "Los estados financieros no bastan para cuantificar IVA, ICA ni el impuesto de renta.",
           otherEntries.length > 0
             ? `${otherEntries.length} partidas sin clasificar automática — revisa la pestaña Datos.`
             : quality.insight,
@@ -166,9 +183,9 @@ export function computeAdvancedAnalytics(
     docType === "balance"
       ? balanceRadar
       : [
-          { name: "Ingresos", value: ingresos },
-          { name: "Costos", value: costos },
-          { name: "Gastos", value: gastos },
+          ...(c.ingresosEntries.length > 0 ? [{ name: "Ingresos", value: ingresos }] : []),
+          ...(costEntries.length > 0 ? [{ name: "Costos", value: costos }] : []),
+          ...(expenseEntries.length > 0 ? [{ name: "Gastos", value: gastos }] : []),
         ];
 
   const balanceIndicators = docType === "balance" ? computeBalanceIndicators(c) : [];
@@ -215,13 +232,15 @@ export function computeAdvancedAnalytics(
     expenseDetails: formattedExpenseDetails,
     balanceDetails,
     allEntries,
+    hasIncomeEntries: c.ingresosEntries.length > 0,
+    hasCostEntries: costEntries.length > 0,
+    hasExpenseEntries: expenseEntries.length > 0,
     otherCount: otherEntries.length,
     ivaGenerado,
     ivaDescontable,
     ivaNeto,
-    rentaEstimada,
+    impuestoRentaReportado,
     ica,
-    totalImpuestos,
     impuestoRatio,
     projection,
     savings,
@@ -235,8 +254,12 @@ export function computeAdvancedAnalytics(
     balanceScenarios,
     pnlScenarios,
     indicatorRadar,
-    ebitda: c.utilidadOperativa + c.depreciacion,
-    utilidadOperativa: c.utilidadOperativa,
+    ebitda: c.hasOperatingProfit ? c.utilidadOperativa + c.depreciacion : null,
+    utilidadOperativa: c.hasOperatingProfit ? c.utilidadOperativa : null,
+    hasTotalAssets: c.hasTotalAssets,
+    hasTotalLiabilities: c.hasTotalLiabilities,
+    hasEquity: c.hasEquity,
+    hasIncomeTax: c.hasIncomeTax,
   };
 }
 
@@ -324,8 +347,8 @@ function BalanceScenarioTable({ rows }: { rows: ScenarioRow[] }) {
               <td className="px-3 py-2 text-right font-mono text-emerald-glow">{fmtCOP(r.activos ?? 0)}</td>
               <td className="px-3 py-2 text-right font-mono text-rose-300">{fmtCOP(r.pasivos ?? 0)}</td>
               <td className="px-3 py-2 text-right font-mono text-amber-300">{fmtCOP(r.patrimonio ?? 0)}</td>
-              <td className="px-3 py-2 text-right font-mono">{(r.liquidez ?? 0).toFixed(2)}x</td>
-              <td className="px-3 py-2 text-right font-mono">{(r.endeudamiento ?? 0).toFixed(1)}%</td>
+              <td className="px-3 py-2 text-right font-mono">{r.liquidez == null ? "N/D" : `${r.liquidez.toFixed(2)}x`}</td>
+              <td className="px-3 py-2 text-right font-mono">{r.endeudamiento == null ? "N/D" : `${r.endeudamiento.toFixed(1)}%`}</td>
             </tr>
           ))}
         </tbody>
@@ -408,7 +431,7 @@ export function ScannerAnalytics({
 }) {
   const [tab, setTab] = useState<Tab>("resumen");
   const [search, setSearch] = useState("");
-  const a = useMemo(() => computeAdvancedAnalytics(totals, profile, docType ?? "pnl"), [totals, profile, docType]);
+  const a = useMemo(() => computeAdvancedAnalytics(totals, docType ?? "pnl"), [totals, docType]);
 
   const topChart = useMemo(
     () => a.allEntries.slice(0, 12).map((e) => ({ name: e.name.length > 22 ? e.name.slice(0, 22) + "…" : e.name, value: Math.abs(e.value), fullName: e.name })),
@@ -430,22 +453,22 @@ export function ScannerAnalytics({
   const kpis =
     a.documentType === "balance"
       ? [
-          { label: "Activos", value: fmtCOP(a.activos), color: "text-emerald-glow" },
-          { label: "Pasivos", value: fmtCOP(a.pasivos), color: "text-rose-400" },
-          { label: "Patrimonio", value: fmtCOP(a.patrimonio), color: "text-amber-300" },
+          { label: "Activos", value: fmtCOP(a.hasTotalAssets ? a.activos : null), color: "text-emerald-glow" },
+          { label: "Pasivos", value: fmtCOP(a.hasTotalLiabilities ? a.pasivos : null), color: "text-rose-400" },
+          { label: "Patrimonio", value: fmtCOP(a.hasEquity ? a.patrimonio : null), color: "text-amber-300" },
           { label: "Cap. trabajo", value: fmtCOP(a.capitalTrabajo), color: "text-neon" },
-          { label: "Liq. corriente", value: a.liquidezCorriente ? a.liquidezCorriente.toFixed(2) + "x" : "—", color: "text-neon" },
-          { label: "Endeudamiento", value: `${a.endeudamiento.toFixed(1)}%`, color: "text-rose-400" },
+          { label: "Liq. corriente", value: a.liquidezCorriente == null ? "N/D" : `${a.liquidezCorriente.toFixed(2)}x`, color: "text-neon" },
+          { label: "Endeudamiento", value: a.endeudamiento == null ? "N/D" : `${a.endeudamiento.toFixed(1)}%`, color: "text-rose-400" },
           { label: "Partidas", value: String(a.allEntries.length), color: "text-slate-300" },
           { label: "Calidad datos", value: a.quality.label, color: "text-emerald-glow" },
         ]
       : [
-          { label: "Ingresos", value: fmtCOP(a.ingresos), color: "text-emerald-glow" },
-          { label: "Costos", value: fmtCOP(a.costos), color: "text-rose-400" },
-          { label: "Gastos", value: fmtCOP(a.gastos), color: "text-amber-300" },
-          { label: "Utilidad neta", value: fmtCOP(a.utilidadNeta), color: a.utilidadNeta >= 0 ? "text-emerald-glow" : "text-destructive" },
-          { label: "Margen neto", value: `${a.margenNeto.toFixed(1)}%`, color: "text-neon" },
-          { label: "Carga fiscal", value: fmtCOP(a.totalImpuestos), color: "text-yellow-300" },
+          { label: "Ingresos", value: fmtCOP(a.hasIncomeEntries ? a.ingresos : null), color: "text-emerald-glow" },
+          { label: "Costos", value: fmtCOP(a.hasCostEntries ? a.costos : null), color: "text-rose-400" },
+          { label: "Gastos", value: fmtCOP(a.hasExpenseEntries ? a.gastos : null), color: "text-amber-300" },
+          { label: "Utilidad neta", value: fmtCOP(a.utilidadNeta), color: a.utilidadNeta != null && a.utilidadNeta >= 0 ? "text-emerald-glow" : "text-destructive" },
+          { label: "Margen neto", value: fmtPercent(a.margenNeto), color: "text-neon" },
+          { label: "Impuesto renta reportado", value: a.hasIncomeTax ? fmtCOP(a.impuestoRentaReportado) : "N/D", color: "text-yellow-300" },
           { label: "Partidas", value: String(a.allEntries.length), color: "text-slate-300" },
           { label: "Calidad datos", value: a.quality.label, color: "text-emerald-glow" },
         ];
@@ -676,10 +699,10 @@ export function ScannerAnalytics({
           ) : (
             <>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <KpiTile label="Utilidad operativa" value={fmtCOP(a.utilidadOperativa)} color={a.utilidadOperativa >= 0 ? "text-emerald-glow" : "text-rose-400"} />
+                <KpiTile label="Utilidad operativa" value={fmtCOP(a.utilidadOperativa)} color={a.utilidadOperativa != null && a.utilidadOperativa >= 0 ? "text-emerald-glow" : "text-rose-400"} />
                 <KpiTile label="EBITDA estimado" value={fmtCOP(a.ebitda)} color="text-neon" />
-                <KpiTile label="Margen bruto" value={`${a.margenBruto.toFixed(1)}%`} color="text-emerald-glow" />
-                <KpiTile label="Margen operativo" value={`${(a.pnlIndicators.find(i => i.id === "margen-op")?.value as number ?? 0).toFixed(1)}%`} color="text-neon" />
+                <KpiTile label="Margen bruto" value={fmtPercent(a.margenBruto)} color="text-emerald-glow" />
+                <KpiTile label="Margen operativo" value={a.pnlIndicators.find(i => i.id === "margen-op")?.display ?? "N/D"} color="text-neon" />
               </div>
               <ChartPanel title="◈ Indicadores de gestión y rentabilidad" subtitle="Márgenes, eficiencia operativa, punto de equilibrio y cobertura financiera.">
                 <IndicatorsPanel rows={a.pnlIndicators} />
@@ -801,7 +824,7 @@ export function ScannerAnalytics({
                     { name: "Gastos/Ing.", pct: a.expenseRatio },
                     { name: "Margen neto", pct: a.margenNeto },
                     { name: "Impuestos/Ing.", pct: a.impuestoRatio },
-                  ]}
+                  ].filter((item) => item.pct != null)}
                 >
                   <CartesianGrid stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="name" stroke="#94a3b8" tick={{ fontSize: 9 }} />

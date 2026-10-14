@@ -22,7 +22,13 @@ type Doc = {
   parsed_data: {
     totals?: Record<string, number>;
     lineItems?: Array<{ label: string; value: number }>;
-    meta?: { entryCount?: number; charCount?: number; source?: string };
+    meta?: {
+      entryCount?: number;
+      charCount?: number;
+      source?: string;
+      unitLabel?: string;
+      unitMultiplier?: number;
+    };
     sheetSummary?: Array<{ sheet: string; rows: number }>;
   } | null;
   file_name: string | null;
@@ -65,6 +71,7 @@ function ScannerPage() {
           docType: doc.doc_type,
           entityType: profile.entity_type,
           sector: profile.sector,
+          meta: doc.parsed_data?.meta,
         },
       });
       if (error) throw error;
@@ -283,7 +290,7 @@ function ScannerPage() {
                     const doc = docs.find((x) => x.id === analysisDoc.id);
                     if (!doc) return;
                     const totals = doc.parsed_data?.totals ?? {};
-                    const a = computeAdvancedAnalytics(totals, profile ?? {}, doc.doc_type);
+                    const a = computeAdvancedAnalytics(totals, doc.doc_type);
                     exportScannerAnalysisXLSX({
                       fileName: analysisDoc.fileName,
                       docType: doc.doc_type,

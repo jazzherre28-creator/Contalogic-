@@ -10,6 +10,7 @@ import {
   type IndicatorRow,
 } from "@/lib/financial-analytics";
 import { computeTaxSavings } from "@/lib/tax-savings";
+import { computeCashFlowMetrics } from "@/lib/unified-finance";
 
 export type ReportProfile = {
   display_name?: string | null;
@@ -54,7 +55,8 @@ const TABLE_BASE = {
 };
 
 /* ─── Formato ─── */
-function fmtCOP(n: number) {
+function fmtCOP(n: number | null) {
+  if (n == null) return "N/D";
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
@@ -70,6 +72,10 @@ function fmtCompact(n: number) {
       maximumFractionDigits: 1,
     }).format(n);
   return fmtCOP(n);
+}
+
+function fmtOptionalCompact(n: number | null) {
+  return n == null ? "N/D" : fmtCompact(n);
 }
 
 function fmtPct(n: number | null, d = 1) {
@@ -110,76 +116,44 @@ function drawTable(doc: jsPDF, opts: Parameters<typeof autoTable>[1]) {
   });
 }
 
-/* ─── Proyección tributaria coherente (misma lógica que analytics) ─── */
-type TaxRow = { concept: string; base: string; rate: string; amount: string; amountNum: number };
+/* ─── Datos tributarios reportados y requisitos de información ─── */
+type TaxRow = { concept: string; base: string; rate: string; amount: string };
 
 function buildTaxProjection(
-  ingresos: number,
-  costos: number,
-  gastos: number,
-  utilidadNeta: number,
-  profile: ReportProfile,
-): { rows: TaxRow[]; total: number; note: string } {
-  const isJuridica = profile.entity_type === "juridica";
-  const tarifaRenta = isJuridica ? 0.35 : 0.19;
-  const baseGastos = costos + gastos;
-
-  const ivaGen = ingresos * 0.19;
-  const ivaDesc = baseGastos * 0.5 * 0.19;
-  const ivaNeto = Math.max(0, ivaGen - ivaDesc);
-
-  let rentaEst: number;
-  let rentaLabel: string;
-  let rentaRate: string;
-
-  if (isJuridica) {
-    rentaEst = Math.max(0, utilidadNeta) * tarifaRenta;
-    rentaLabel = "Impuesto de renta (Art. 240 ET)";
-    rentaRate = "35%";
-  } else {
-    rentaEst = Math.max(0, utilidadNeta) * tarifaRenta;
-    rentaLabel = "Renta cedular (estimado)";
-    rentaRate = "19%";
-  }
-
-  const ica = ingresos * 0.00966;
-  const total = ivaNeto + rentaEst + ica;
-
+  impuestoRentaReportado?: number,
+): { rows: TaxRow[]; note: string } {
   const rows: TaxRow[] = [
-    { concept: "IVA generado", base: fmtCOP(ingresos), rate: "19%", amount: fmtCOP(ivaGen), amountNum: ivaGen },
+    { concept: "IVA generado", base: "Requiere ventas gravadas", rate: "N/D", amount: "N/D" },
     {
-      concept: "IVA descontable (Art. 485 ET)",
-      base: fmtCOP(baseGastos * 0.5),
-      rate: "19%",
-      amount: fmtCOP(ivaDesc),
-      amountNum: ivaDesc,
-    },
-    { concept: "IVA neto a pagar", base: "—", rate: "—", amount: fmtCOP(ivaNeto), amountNum: ivaNeto },
-    {
-      concept: rentaLabel,
-      base: fmtCOP(Math.max(0, utilidadNeta)),
-      rate: rentaRate,
-      amount: fmtCOP(rentaEst),
-      amountNum: rentaEst,
+      concept: "IVA descontable",
+      base: "Requiere detalle de facturas",
+      rate: "N/D",
+      amount: "N/D",
     },
     {
-      concept: "ICA (referencia Bogotá)",
-      base: fmtCOP(ingresos),
-      rate: "0,966%",
-      amount: fmtCOP(ica),
-      amountNum: ica,
+      concept: "Impuesto de renta reportado",
+      base: "Según estado financiero",
+      rate: impuestoRentaReportado == null ? "N/D" : "Reportado",
+      amount: impuestoRentaReportado == null ? "N/D" : fmtCOP(impuestoRentaReportado),
     },
-    { concept: "Total impuestos estimados", base: "—", rate: "—", amount: fmtCOP(total), amountNum: total },
+    {
+      concept: "ICA",
+      base: "Requiere municipio, actividad y base gravable",
+      rate: "N/D",
+      amount: "N/D",
+    },
+    {
+      concept: "Total de tributos",
+      base: "No determinable con la información disponible",
+      rate: "—",
+      amount: "N/D",
+    },
   ];
 
-  const note =
-    ingresos <= 0 && utilidadNeta <= 0
-      ? "No hay base gravable suficiente para estimar impuestos. Este apartado aplica cuando existen ingresos o utilidad en el periodo."
-      : isJuridica
-        ? "Estimación orientativa bajo régimen ordinario. Las deducciones del Art. 107 ET pueden reducir la base de renta. No incluye retenciones (anticipo de impuesto)."
-        : "Estimación orientativa. Compare RST vs. régimen ordinario con su contador. No incluye retenciones practicadas.";
-
-  return { rows, total, note };
+  return {
+    rows,
+    note: "No se proyectan IVA ni ICA a partir de un estado financiero resumido. La renta reportada se presenta como dato del documento, no como liquidación: valide periodo, régimen, conciliación fiscal, retenciones y soportes con un contador.",
+  };
 }
 
 function buildFiscalSavingsRows(
@@ -413,7 +387,7 @@ function indicatorsTable(doc: jsPDF, y: number, indicators: IndicatorRow[]) {
 function taxTable(doc: jsPDF, y: number, projection: ReturnType<typeof buildTaxProjection>) {
   drawTable(doc, {
     startY: y,
-    head: [["Impuesto", "Base gravable", "Tarifa", "Estimado"]],
+    head: [["Impuesto", "Base / soporte requerido", "Tarifa", "Valor / estado"]],
     body: projection.rows.map((r) => [r.concept, r.base, r.rate, r.amount]),
     columnStyles: {
       0: { cellWidth: 58 },
@@ -503,13 +477,13 @@ export function generateDashboardReport(args: {
   let y = header(
     doc,
     "Informe financiero consolidado",
-    "Resumen de movimientos, indicadores y proyeccion tributaria del periodo.",
+    "Resumen de movimientos, indicadores y datos tributarios disponibles.",
     profile,
     "FINANZAS",
   );
 
   const margen = totals.income > 0 ? (totals.balance / totals.income) * 100 : null;
-  const tax = buildTaxProjection(totals.income, totals.expense, 0, totals.balance, profile);
+  const tax = buildTaxProjection();
 
   y = section(doc, y, "1", "Resumen del periodo");
   y = kpiGrid(doc, y, [
@@ -527,12 +501,12 @@ export function generateDashboardReport(args: {
     doc,
     y,
     totals.balance >= 0
-      ? `Flujo positivo. Impuestos estimados del periodo: ${fmtCOP(tax.total)}.`
+      ? "Flujo positivo. Los movimientos no contienen la información fiscal necesaria para liquidar impuestos."
       : `Deficit de ${fmtCOP(Math.abs(totals.balance))}. Revise egresos antes de proyectar tributos.`,
     totals.balance >= 0 ? "ok" : "bad",
   );
 
-  y = section(doc, y, "2", "Proyeccion tributaria");
+  y = section(doc, y, "2", "Informacion tributaria disponible");
   y = taxTable(doc, y, tax);
   y = paragraph(doc, y, tax.note);
 
@@ -566,6 +540,13 @@ export function generateCalculatorReport(args: {
   });
   const balance = income - expense;
   const margen = income > 0 ? (balance / income) * 100 : null;
+  const cashMetrics = computeCashFlowMetrics(
+    records.map((record) => ({
+      ...record,
+      kind: record.kind === "income" ? "income" as const : "expense" as const,
+      source: "manual" as const,
+    })),
+  );
 
   const byCat = new Map<string, { in: number; out: number }>();
   records.forEach((r) => {
@@ -578,13 +559,13 @@ export function generateCalculatorReport(args: {
   const doc = new jsPDF();
   let y = header(
     doc,
-    "Libro auxiliar de movimientos",
-    "Detalle por categoria, conciliacion y efecto tributario estimado.",
+    "Libro auxiliar de movimientos manuales",
+    "Análisis de caja de registros de la calculadora; no incluye estados OCR.",
     profile,
     "CALCULADORA",
   );
 
-  const tax = buildTaxProjection(income, expense, 0, balance, profile);
+  const tax = buildTaxProjection();
 
   y = section(doc, y, "1", "Resumen");
   y = kpiGrid(doc, y, [
@@ -592,7 +573,14 @@ export function generateCalculatorReport(args: {
     { label: "Egresos", value: fmtCompact(expense) },
     { label: "Saldo neto", value: fmtCompact(balance), hint: margen != null ? fmtPct(margen) : undefined },
     { label: "Registros", value: String(records.length) },
+    { label: "Egreso mensual aprox.", value: fmtOptionalCompact(cashMetrics.quemaMensual) },
+    { label: "Runway", value: "N/D", hint: "requiere saldo de caja disponible" },
   ]);
+  y = paragraph(
+    doc,
+    y,
+    `Margen de flujo: ${fmtPct(cashMetrics.margenFlujo)}. Días con movimientos: ${cashMetrics.diasConMovimiento}. El egreso mensual solo se extrapola cuando hay al menos 7 días entre el primer y último movimiento. El saldo neto registrado no equivale a caja disponible; por eso no se calcula runway.`,
+  );
 
   y = section(doc, y, "2", "Consolidado por categoria");
   drawTable(doc, {
@@ -624,7 +612,7 @@ export function generateCalculatorReport(args: {
   });
   y = tableEnd(doc);
 
-  y = section(doc, y, "4", "Proyeccion tributaria");
+  y = section(doc, y, "4", "Informacion tributaria disponible");
   y = taxTable(doc, y, tax);
   y = paragraph(doc, y, tax.note);
 
@@ -650,6 +638,10 @@ export function generateScannerReport(args: {
   const type = docType === "balance" ? "balance" : "pnl";
   const c = classifyTotals(totals);
   const quality = dataQualityScore(Object.keys(totals).filter((k) => totals[k] !== 0).length);
+  const margenBruto =
+    c.hasGrossProfit && c.ingresos > 0 ? (c.utilidadBruta / c.ingresos) * 100 : null;
+  const margenNeto =
+    c.hasNetIncome && c.ingresos > 0 ? (c.utilidadNeta / c.ingresos) * 100 : null;
 
   const doc = new jsPDF();
   const docLabel = type === "balance" ? "Estado de situacion financiera" : "Estado de resultados (P&L)";
@@ -665,44 +657,77 @@ export function generateScannerReport(args: {
   /* --- KPIs segun tipo de documento --- */
   y = section(doc, y, "1", "Cifras principales");
   if (type === "balance") {
+    const hasCapitalTrabajo = c.hasCurrentAssets && c.hasCurrentLiabilities;
+    const capitalTrabajo = hasCapitalTrabajo ? c.activosCorrientes - c.pasivosCorrientes : null;
+    const canVerifyEquation = c.hasTotalAssets && c.hasTotalLiabilities && c.hasEquity;
     y = kpiGrid(doc, y, [
-      { label: "Total activos", value: fmtCompact(c.activos), hint: fmtCOP(c.activos) },
-      { label: "Total pasivos", value: fmtCompact(c.pasivos), hint: fmtCOP(c.pasivos) },
-      { label: "Patrimonio", value: fmtCompact(c.patrimonio), hint: fmtCOP(c.patrimonio) },
+      { label: "Total activos", value: fmtOptionalCompact(c.hasTotalAssets ? c.activos : null) },
+      { label: "Total pasivos", value: fmtOptionalCompact(c.hasTotalLiabilities ? c.pasivos : null) },
+      { label: "Patrimonio", value: fmtOptionalCompact(c.hasEquity ? c.patrimonio : null) },
       {
         label: "Capital de trabajo",
-        value: fmtCompact(c.activosCorrientes - c.pasivosCorrientes),
+        value: fmtOptionalCompact(capitalTrabajo),
         hint: "Activos corrientes - Pasivos corrientes",
       },
     ]);
-    const dif = Math.abs(c.activos - (c.pasivos + c.patrimonio));
-    const cuadra = c.activos === 0 || dif <= c.activos * 0.05;
-    y = diagnosis(
-      doc,
-      y,
-      cuadra
-        ? "La ecuacion contable (Activos = Pasivos + Patrimonio) cuadra dentro de tolerancia."
-        : `Descuadre detectado: ${fmtCOP(dif)}. Valide totales antes de usar el informe.`,
-      cuadra ? "ok" : "warn",
-    );
+    if (canVerifyEquation) {
+      const dif = Math.abs(c.activos - (c.pasivos + c.patrimonio));
+      const cuadra = dif <= Math.max(1, c.activos * 0.05);
+      y = diagnosis(
+        doc,
+        y,
+        cuadra
+          ? "La ecuacion contable (Activos = Pasivos + Patrimonio) cuadra dentro de tolerancia."
+          : `Descuadre detectado: ${fmtCOP(dif)}. Valide totales antes de usar el informe.`,
+        cuadra ? "ok" : "warn",
+      );
+    } else {
+      y = diagnosis(doc, y, "No se puede verificar A = P + Patrimonio: faltan uno o mas totales en el documento.", "warn");
+    }
   } else {
-    const utilidad = c.ingresos - c.costos - c.gastos;
-    const mb = c.ingresos > 0 ? ((c.ingresos - c.costos) / c.ingresos) * 100 : null;
-    const mn = c.ingresos > 0 ? (utilidad / c.ingresos) * 100 : null;
+    const utilidad = c.hasNetIncome ? c.utilidadNeta : null;
+    const mn = utilidad != null && c.ingresos > 0 ? (utilidad / c.ingresos) * 100 : null;
     y = kpiGrid(doc, y, [
-      { label: "Ingresos", value: fmtCompact(c.ingresos) },
-      { label: "Costos", value: fmtCompact(c.costos) },
-      { label: "Gastos", value: fmtCompact(c.gastos) },
-      { label: "Utilidad neta", value: fmtCompact(utilidad), hint: mn != null ? `Margen ${fmtPct(mn)}` : undefined },
+      { label: "Ingresos", value: fmtOptionalCompact(c.ingresosEntries.length > 0 ? c.ingresos : null) },
+      { label: "Costos", value: fmtOptionalCompact(c.costEntries.length > 0 ? c.costos : null) },
+      { label: "Gastos", value: fmtOptionalCompact(c.expenseEntries.length > 0 ? c.gastos : null) },
+      { label: "Utilidad neta", value: fmtOptionalCompact(utilidad), hint: mn != null ? `Margen ${fmtPct(mn)}` : undefined },
     ]);
     y = diagnosis(
       doc,
       y,
-      mb != null
-        ? `Margen bruto ${fmtPct(mb)} · Utilidad neta ${fmtCOP(utilidad)}.`
-        : "Datos de ingresos insuficientes para calcular margenes.",
-      utilidad >= 0 ? "ok" : "bad",
+      utilidad == null
+        ? margenBruto != null
+          ? `Margen bruto ${fmtPct(margenBruto)}. Utilidad neta no reportada o no calculable con los datos disponibles.`
+          : "Datos insuficientes para calcular margenes y utilidad neta."
+        : `Margen bruto ${fmtPct(margenBruto)} · Utilidad neta reportada ${fmtCOP(utilidad)}.`,
+      utilidad == null ? "warn" : utilidad >= 0 ? "ok" : "bad",
     );
+  }
+
+  if (type === "pnl" && c.hasOperatingProfit && c.hasGrossProfit && c.expenseEntries.length > 0) {
+    const formulaEbit = c.utilidadBruta - c.gastos + c.otrosIngresosOperativos;
+    const difference = c.utilidadOperativa - formulaEbit;
+    if (Math.abs(difference) > Math.max(1_000, Math.abs(c.utilidadOperativa) * 0.001)) {
+      y = diagnosis(
+        doc,
+        y,
+        `Inconsistencia: EBIT reportado ${fmtCOP(c.utilidadOperativa)}; utilidad bruta - gastos operativos + otros ingresos operativos = ${fmtCOP(formulaEbit)} (diferencia ${fmtCOP(difference)}).`,
+        "warn",
+      );
+    }
+  }
+  if (type === "pnl" && c.hasProfitBeforeTax && c.hasIncomeTax && c.hasNetIncome) {
+    const formulaNet = c.utilidadAntesImpuestos - c.impuestoRenta;
+    const difference = c.utilidadNeta - formulaNet;
+    if (Math.abs(difference) > Math.max(1_000, Math.abs(c.utilidadNeta) * 0.001)) {
+      y = diagnosis(
+        doc,
+        y,
+        `Inconsistencia: utilidad neta reportada ${fmtCOP(c.utilidadNeta)}; utilidad antes de impuestos - impuesto de renta = ${fmtCOP(formulaNet)} (diferencia ${fmtCOP(difference)}).`,
+        "warn",
+      );
+    }
   }
 
   y = paragraph(doc, y, quality.insight);
@@ -715,28 +740,35 @@ export function generateScannerReport(args: {
       startY: y,
       head: [["Rubro", "Valor (COP)"]],
       body: [
-        ["Activos corrientes", fmtCOP(c.activosCorrientes)],
-        ["Activos no corrientes", fmtCOP(c.activosNoCorrientes)],
-        ["Total activos", fmtCOP(c.activos)],
-        ["Pasivos corrientes", fmtCOP(c.pasivosCorrientes)],
-        ["Pasivos no corrientes", fmtCOP(c.pasivosNoCorrientes)],
-        ["Total pasivos", fmtCOP(c.pasivos)],
-        ["Patrimonio", fmtCOP(c.patrimonio)],
-        ["Pasivos + Patrimonio", fmtCOP(c.pasivos + c.patrimonio)],
+        ["Activos corrientes", fmtCOP(c.hasCurrentAssets ? c.activosCorrientes : null)],
+        ["Activos no corrientes", fmtCOP(c.hasNonCurrentAssets ? c.activosNoCorrientes : null)],
+        ["Total activos", fmtCOP(c.hasTotalAssets ? c.activos : null)],
+        ["Pasivos corrientes", fmtCOP(c.hasCurrentLiabilities ? c.pasivosCorrientes : null)],
+        ["Pasivos no corrientes", fmtCOP(c.hasNonCurrentLiabilities ? c.pasivosNoCorrientes : null)],
+        ["Total pasivos", fmtCOP(c.hasTotalLiabilities ? c.pasivos : null)],
+        ["Patrimonio", fmtCOP(c.hasEquity ? c.patrimonio : null)],
+        [
+          "Pasivos + Patrimonio",
+          fmtCOP(c.hasTotalLiabilities && c.hasEquity ? c.pasivos + c.patrimonio : null),
+        ],
       ],
       columnStyles: { 0: { cellWidth: 90 }, 1: { halign: "right", fontStyle: "bold" } },
     });
   } else {
-    const utilidad = c.ingresos - c.costos - c.gastos;
     drawTable(doc, {
       startY: y,
       head: [["Concepto", "Valor (COP)", "% s/ ingresos"]],
       body: [
-        ["Ingresos operacionales", fmtCOP(c.ingresos), "100%"],
-        ["Costo de ventas", fmtCOP(c.costos), fmtPct(c.ingresos > 0 ? (c.costos / c.ingresos) * 100 : null)],
-        ["Utilidad bruta", fmtCOP(c.ingresos - c.costos), fmtPct(c.ingresos > 0 ? ((c.ingresos - c.costos) / c.ingresos) * 100 : null)],
-        ["Gastos operacionales", fmtCOP(c.gastos), fmtPct(c.ingresos > 0 ? (c.gastos / c.ingresos) * 100 : null)],
-        ["Utilidad neta", fmtCOP(utilidad), fmtPct(c.ingresos > 0 ? (utilidad / c.ingresos) * 100 : null)],
+        ["Ingresos operacionales", fmtCOP(c.ingresosEntries.length > 0 ? c.ingresos : null), c.ingresosEntries.length > 0 ? "100%" : "N/D"],
+        ["Costo de ventas", fmtCOP(c.costEntries.length > 0 ? c.costos : null), fmtPct(c.ingresos > 0 && c.costEntries.length > 0 ? (c.costos / c.ingresos) * 100 : null)],
+        ["Utilidad bruta", fmtCOP(c.hasGrossProfit ? c.utilidadBruta : null), fmtPct(margenBruto)],
+        ["Gastos operacionales", fmtCOP(c.expenseEntries.length > 0 ? c.gastos : null), fmtPct(c.ingresos > 0 && c.expenseEntries.length > 0 ? (c.gastos / c.ingresos) * 100 : null)],
+        ...(c.otrosIngresosOperativos !== 0 ? [["Otros ingresos operativos", fmtCOP(c.otrosIngresosOperativos), "—"]] : []),
+        ...(c.ingresosFinancieros !== 0 ? [["Ingresos financieros", fmtCOP(c.ingresosFinancieros), "—"]] : []),
+        ...(c.gastosFinancieros !== 0 ? [["Gastos financieros", fmtCOP(c.gastosFinancieros), "—"]] : []),
+        ...(c.hasProfitBeforeTax ? [["Utilidad antes de impuestos", fmtCOP(c.utilidadAntesImpuestos), "—"]] : []),
+        ...(c.hasIncomeTax ? [["Impuesto de renta reportado", fmtCOP(c.impuestoRenta), "—"]] : []),
+        ["Utilidad neta", fmtCOP(c.hasNetIncome ? c.utilidadNeta : null), fmtPct(margenNeto)],
       ],
       columnStyles: { 1: { halign: "right", fontStyle: "bold" }, 2: { halign: "right" } },
     });
@@ -749,10 +781,9 @@ export function generateScannerReport(args: {
   y = indicatorsTable(doc, y, indicators.slice(0, 10));
 
   /* --- Tributario: solo donde aplica --- */
-  y = section(doc, y, "4", "Proyeccion tributaria");
+  y = section(doc, y, "4", "Informacion tributaria disponible");
   if (type === "pnl" && c.ingresos > 0) {
-    const utilidad = c.ingresos - c.costos - c.gastos;
-    const tax = buildTaxProjection(c.ingresos, c.costos, c.gastos, utilidad, profile);
+    const tax = buildTaxProjection(c.hasIncomeTax ? c.impuestoRenta : undefined);
     y = taxTable(doc, y, tax);
     y = paragraph(doc, y, tax.note);
   } else {
@@ -804,9 +835,13 @@ export function generateBalanceReport(args: {
     Patrimonio: datos.patrimonio,
   });
 
-  const capitalTrabajo = datos.activosCorrientes - datos.pasivosCorrientes;
+  const capitalTrabajo =
+    c.hasCurrentAssets && c.hasCurrentLiabilities
+      ? datos.activosCorrientes - datos.pasivosCorrientes
+      : null;
   const dif = Math.abs(datos.activos - (datos.pasivos + datos.patrimonio));
-  const cuadra = datos.activos === 0 || dif <= datos.activos * 0.01;
+  const canVerifyEquation = c.hasTotalAssets && c.hasTotalLiabilities && c.hasEquity;
+  const cuadra = canVerifyEquation && dif <= Math.max(1, datos.activos * 0.01);
   const indicators = computeBalanceIndicators(c);
 
   const doc = new jsPDF();
@@ -820,19 +855,21 @@ export function generateBalanceReport(args: {
 
   y = section(doc, y, "1", "Resumen patrimonial");
   y = kpiGrid(doc, y, [
-    { label: "Activos", value: fmtCompact(datos.activos) },
-    { label: "Pasivos", value: fmtCompact(datos.pasivos) },
-    { label: "Patrimonio", value: fmtCompact(datos.patrimonio) },
-    { label: "Capital de trabajo", value: fmtCompact(capitalTrabajo) },
+    { label: "Activos", value: fmtOptionalCompact(c.hasTotalAssets ? datos.activos : null) },
+    { label: "Pasivos", value: fmtOptionalCompact(c.hasTotalLiabilities ? datos.pasivos : null) },
+    { label: "Patrimonio", value: fmtOptionalCompact(c.hasEquity ? datos.patrimonio : null) },
+    { label: "Capital de trabajo", value: fmtOptionalCompact(capitalTrabajo) },
   ]);
 
   y = diagnosis(
     doc,
     y,
-    cuadra
-      ? `Balance cuadrado. Capital de trabajo: ${fmtCOP(capitalTrabajo)}.`
-      : `Descuadre de ${fmtCOP(dif)} entre activos y (pasivos + patrimonio).`,
-    cuadra ? (capitalTrabajo >= 0 ? "ok" : "warn") : "bad",
+    !canVerifyEquation
+      ? "No se puede verificar A = P + Patrimonio porque faltan uno o mas totales."
+      : cuadra
+        ? `Balance cuadrado. Capital de trabajo: ${fmtCOP(capitalTrabajo)}.`
+        : `Descuadre de ${fmtCOP(dif)} entre activos y (pasivos + patrimonio).`,
+    !canVerifyEquation ? "warn" : cuadra ? (capitalTrabajo != null && capitalTrabajo >= 0 ? "ok" : "warn") : "bad",
   );
 
   y = section(doc, y, "2", "Balance general");
@@ -840,10 +877,10 @@ export function generateBalanceReport(args: {
     startY: y,
     head: [["Rubro", "Corriente", "No corriente", "Total"]],
     body: [
-      ["Activos", fmtCOP(datos.activosCorrientes), fmtCOP(datos.activosNoCorrientes), fmtCOP(datos.activos)],
-      ["Pasivos", fmtCOP(datos.pasivosCorrientes), fmtCOP(datos.pasivosNoCorrientes), fmtCOP(datos.pasivos)],
-      ["Patrimonio", "—", "—", fmtCOP(datos.patrimonio)],
-      ["Verificacion A = P + Pat", "—", "—", cuadra ? "Cuadra" : fmtCOP(dif)],
+      ["Activos", fmtCOP(c.hasCurrentAssets ? datos.activosCorrientes : null), fmtCOP(c.hasNonCurrentAssets ? datos.activosNoCorrientes : null), fmtCOP(c.hasTotalAssets ? datos.activos : null)],
+      ["Pasivos", fmtCOP(c.hasCurrentLiabilities ? datos.pasivosCorrientes : null), fmtCOP(c.hasNonCurrentLiabilities ? datos.pasivosNoCorrientes : null), fmtCOP(c.hasTotalLiabilities ? datos.pasivos : null)],
+      ["Patrimonio", "—", "—", fmtCOP(c.hasEquity ? datos.patrimonio : null)],
+      ["Verificacion A = P + Pat", "—", "—", canVerifyEquation ? (cuadra ? "Cuadra" : fmtCOP(dif)) : "N/D"],
     ],
     columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right", fontStyle: "bold" } },
   });
@@ -869,7 +906,11 @@ export function generateBalanceReport(args: {
   y = bullets(doc, y, [
     cuadra ? "Mantenga conciliacion mensual de activos, pasivos y patrimonio." : "Corrija el descuadre antes de presentar estados financieros.",
     "Meta de liquidez corriente: 1,5x o superior.",
-    capitalTrabajo < 0 ? "Capital de trabajo negativo: renegocie plazos o acelere cobranza." : "Preserve liquidez para ciclo operativo.",
+    capitalTrabajo == null
+      ? "Complete activos y pasivos corrientes para calcular capital de trabajo."
+      : capitalTrabajo < 0
+        ? "Capital de trabajo negativo: renegocie plazos o acelere cobranza."
+        : "Preserve liquidez para ciclo operativo.",
   ]);
 
   footer(doc);
@@ -881,57 +922,120 @@ export function generatePnLReport(args: {
   datos: DatosFinancierosGlobales;
 }) {
   const { profile, datos } = args;
-  const utilidadBruta = datos.ingresos - datos.costos;
-  const utilidadNeta = datos.ingresos - datos.costos - datos.gastos;
-  const c = classifyTotals({
-    Ingresos: datos.ingresos,
-    "Costo de ventas": datos.costos,
-    "Gastos operacionales": datos.gastos,
-  });
+  const hasIncomeTax = datos.source === "ocr"
+    ? datos.tieneImpuestoRenta === true
+    : datos.impuestoRenta != null;
+  const hasNetIncome = datos.source === "ocr"
+    ? datos.tieneUtilidadNeta === true
+    : datos.utilidadNeta != null;
+  const gastoOperativo = Math.max(
+    0,
+    datos.gastos - (datos.gastosFinancieros ?? 0) - (hasIncomeTax ? datos.impuestoRenta ?? 0 : 0),
+  );
+  const totals: Record<string, number> = {
+    "Ingresos operacionales": datos.ingresos,
+    "Costo de ventas": -datos.costos,
+    "Gastos operacionales": -gastoOperativo,
+  };
+  if (datos.otrosIngresosOperativos) totals["Otros ingresos operativos"] = datos.otrosIngresosOperativos;
+  if (datos.ingresosFinancieros) totals["Ingresos financieros"] = datos.ingresosFinancieros;
+  if (datos.gastosFinancieros) totals["Gastos financieros"] = -datos.gastosFinancieros;
+  if (hasIncomeTax) totals["Impuesto de renta"] = -(datos.impuestoRenta ?? 0);
+  if (datos.utilidadBruta != null) totals["Utilidad bruta"] = datos.utilidadBruta;
+  if (datos.utilidadOperativa != null) totals["Utilidad operacional"] = datos.utilidadOperativa;
+  if (datos.utilidadNeta != null && hasNetIncome) {
+    totals["Utilidad neta"] = datos.utilidadNeta;
+  }
+  const c = classifyTotals(totals);
+  const utilidadBruta = c.hasGrossProfit ? c.utilidadBruta : null;
+  const utilidadNeta = c.hasNetIncome ? c.utilidadNeta : null;
+  const hasIngresos = datos.source !== "ocr" || c.ingresosEntries.length > 0;
+  const hasCostos = datos.source !== "ocr" || c.costEntries.length > 0;
+  const hasGastos = datos.source !== "ocr" || c.expenseEntries.length > 0;
   const indicators = computePnLIndicators(c);
-  const tax = buildTaxProjection(datos.ingresos, datos.costos, datos.gastos, utilidadNeta, profile);
+  const tax = buildTaxProjection(hasIncomeTax ? datos.impuestoRenta ?? 0 : undefined);
 
   const doc = new jsPDF();
   let y = header(
     doc,
     "Estado de resultados (P&L)",
-    "Rentabilidad, indicadores de eficiencia, proyeccion tributaria y ahorro fiscal.",
+    "Rentabilidad, indicadores de eficiencia y datos tributarios reportados.",
     profile,
     "P&L",
   );
 
-  const mb = datos.ingresos > 0 ? (utilidadBruta / datos.ingresos) * 100 : null;
-  const mn = datos.ingresos > 0 ? (utilidadNeta / datos.ingresos) * 100 : null;
+  const mb = utilidadBruta != null && datos.ingresos > 0 ? (utilidadBruta / datos.ingresos) * 100 : null;
+  const mn = utilidadNeta != null && datos.ingresos > 0 ? (utilidadNeta / datos.ingresos) * 100 : null;
 
   y = section(doc, y, "1", "Resumen de resultados");
   y = kpiGrid(doc, y, [
-    { label: "Ingresos", value: fmtCompact(datos.ingresos) },
-    { label: "Costos", value: fmtCompact(datos.costos) },
-    { label: "Utilidad bruta", value: fmtCompact(utilidadBruta), hint: mb != null ? fmtPct(mb) : undefined },
-    { label: "Utilidad neta", value: fmtCompact(utilidadNeta), hint: mn != null ? fmtPct(mn) : undefined },
+    { label: "Ingresos", value: fmtOptionalCompact(hasIngresos ? datos.ingresos : null) },
+    { label: "Costos", value: fmtOptionalCompact(hasCostos ? datos.costos : null) },
+    { label: "Utilidad bruta", value: fmtOptionalCompact(utilidadBruta), hint: mb != null ? fmtPct(mb) : undefined },
+    { label: "Utilidad neta", value: fmtOptionalCompact(utilidadNeta), hint: mn != null ? fmtPct(mn) : undefined },
   ]);
 
   y = diagnosis(
     doc,
     y,
-    utilidadNeta >= 0
-      ? `Utilidad neta ${fmtCOP(utilidadNeta)}. Impuestos estimados: ${fmtCOP(tax.total)} (${datos.ingresos > 0 ? fmtPct((tax.total / datos.ingresos) * 100) : "N/D"} s/ ingresos).`
-      : `Perdida operativa de ${fmtCOP(Math.abs(utilidadNeta))}. Revise estructura de costos y gastos.`,
-    utilidadNeta >= 0 ? (mn != null && mn >= 8 ? "ok" : "warn") : "bad",
+    utilidadNeta == null
+      ? "La utilidad neta no esta reportada o no puede determinarse con los datos disponibles."
+      : utilidadNeta >= 0
+        ? `Utilidad neta reportada ${fmtCOP(utilidadNeta)}. No se infiere una carga tributaria total.`
+        : `Perdida neta reportada de ${fmtCOP(Math.abs(utilidadNeta))}. Revise estructura de costos y gastos.`,
+    utilidadNeta == null ? "warn" : utilidadNeta >= 0 ? (mn != null && mn >= 8 ? "ok" : "warn") : "bad",
   );
+  if (utilidadBruta != null && datos.ingresos > 0 && datos.costos > 0) {
+    const utilidadBrutaFormula = datos.ingresos - datos.costos;
+    const difference = utilidadBruta - utilidadBrutaFormula;
+    if (Math.abs(difference) > Math.max(1_000, Math.abs(utilidadBruta) * 0.001)) {
+      y = diagnosis(
+        doc,
+        y,
+        `Inconsistencia: utilidad bruta reportada ${fmtCOP(utilidadBruta)}; ingresos - costos = ${fmtCOP(utilidadBrutaFormula)} (diferencia ${fmtCOP(difference)}).`,
+        "warn",
+      );
+    }
+  }
+  if (c.hasOperatingProfit && c.hasGrossProfit && c.expenseEntries.length > 0) {
+    const formulaEbit = c.utilidadBruta - c.gastos + c.otrosIngresosOperativos;
+    const difference = c.utilidadOperativa - formulaEbit;
+    if (Math.abs(difference) > Math.max(1_000, Math.abs(c.utilidadOperativa) * 0.001)) {
+      y = diagnosis(
+        doc,
+        y,
+        `Inconsistencia: EBIT reportado ${fmtCOP(c.utilidadOperativa)}; utilidad bruta - gastos operativos + otros ingresos operativos = ${fmtCOP(formulaEbit)} (diferencia ${fmtCOP(difference)}).`,
+        "warn",
+      );
+    }
+  }
+  if (c.hasProfitBeforeTax && c.hasIncomeTax && c.hasNetIncome) {
+    const formulaNet = c.utilidadAntesImpuestos - c.impuestoRenta;
+    const difference = c.utilidadNeta - formulaNet;
+    if (Math.abs(difference) > Math.max(1_000, Math.abs(c.utilidadNeta) * 0.001)) {
+      y = diagnosis(
+        doc,
+        y,
+        `Inconsistencia: utilidad neta reportada ${fmtCOP(c.utilidadNeta)}; utilidad antes de impuestos - impuesto de renta = ${fmtCOP(formulaNet)} (diferencia ${fmtCOP(difference)}).`,
+        "warn",
+      );
+    }
+  }
 
   y = section(doc, y, "2", "Estado de resultados");
   drawTable(doc, {
     startY: y,
     head: [["Concepto", "Valor (COP)", "% ingresos"]],
     body: [
-      ["(+) Ingresos operacionales", fmtCOP(datos.ingresos), "100%"],
-      ["(-) Costo de ventas", fmtCOP(datos.costos), fmtPct(datos.ingresos > 0 ? (datos.costos / datos.ingresos) * 100 : null)],
+      ["(+) Ingresos operacionales", fmtCOP(hasIngresos ? datos.ingresos : null), hasIngresos ? "100%" : "N/D"],
+      ["(-) Costo de ventas", fmtCOP(hasCostos ? datos.costos : null), fmtPct(hasIngresos && hasCostos && datos.ingresos > 0 ? (datos.costos / datos.ingresos) * 100 : null)],
       ["(=) Utilidad bruta", fmtCOP(utilidadBruta), fmtPct(mb)],
-      ["(-) Gastos operacionales", fmtCOP(datos.gastos), fmtPct(datos.ingresos > 0 ? (datos.gastos / datos.ingresos) * 100 : null)],
+      ["(-) Gastos operacionales", fmtCOP(hasGastos ? gastoOperativo : null), fmtPct(hasIngresos && hasGastos && datos.ingresos > 0 ? (gastoOperativo / datos.ingresos) * 100 : null)],
       ...(datos.gastosAdmin ? [["    Gastos administrativos", fmtCOP(datos.gastosAdmin), "—"]] : []),
       ...(datos.gastosVentas ? [["    Gastos de ventas", fmtCOP(datos.gastosVentas), "—"]] : []),
       ...(datos.gastosFinancieros ? [["    Gastos financieros", fmtCOP(datos.gastosFinancieros), "—"]] : []),
+      ...(hasIncomeTax ? [["(-) Impuesto de renta reportado", fmtCOP(datos.impuestoRenta ?? 0), "—"]] : []),
+      ...(c.hasProfitBeforeTax ? [["(=) Utilidad antes de impuestos", fmtCOP(c.utilidadAntesImpuestos), "—"]] : []),
       ["(=) Utilidad neta", fmtCOP(utilidadNeta), fmtPct(mn)],
     ],
     columnStyles: { 1: { halign: "right", fontStyle: "bold" }, 2: { halign: "right" } },
@@ -941,7 +1045,7 @@ export function generatePnLReport(args: {
   y = section(doc, y, "3", "Indicadores de eficiencia");
   y = indicatorsTable(doc, y, indicators);
 
-  y = section(doc, y, "4", "Proyeccion tributaria");
+  y = section(doc, y, "4", "Informacion tributaria disponible");
   y = taxTable(doc, y, tax);
   y = paragraph(doc, y, tax.note);
 
@@ -964,7 +1068,11 @@ export function generatePnLReport(args: {
   y = section(doc, y, "6", "Plan de accion");
   y = bullets(doc, y, [
     mb != null && mb < 30 ? "Margen bruto bajo: renegocie costos o ajuste precios." : "Mantenga control de costos directos.",
-    mn != null && mn < 8 ? "Margen neto por debajo del benchmark (8%): reduzca gastos operativos." : "Rentabilidad en rango aceptable.",
+    mn == null
+      ? "Margen neto no disponible; valide utilidad neta y sus componentes antes de compararlo."
+      : mn < 8
+        ? "Margen neto por debajo del benchmark de referencia (8%): revise gastos operativos."
+        : "Rentabilidad en rango aceptable.",
     "Documente deducciones con soporte (Art. 107 ET) antes del cierre fiscal.",
     "Concilie este P&L con balance y movimientos de caja.",
   ]);

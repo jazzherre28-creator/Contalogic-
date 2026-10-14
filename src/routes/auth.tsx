@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { getAuthRedirectUrl } from "@/lib/auth-redirect";
 import { useAuth } from "@/lib/auth-context";
 import { Mail, Lock, Sparkles, Loader2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
@@ -17,14 +18,19 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("confirmed") === "1",
+  );
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || showConfirmation) return;
     if (user) {
       if (profile && !profile.onboarded) nav({ to: "/onboarding" });
       else if (profile?.onboarded) nav({ to: "/dashboard" });
     }
-  }, [user, profile, loading, nav]);
+  }, [user, profile, loading, nav, showConfirmation]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,16 +38,24 @@ function AuthPage() {
     setBusy(true);
     try {
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: `${window.location.origin}/onboarding` },
+          options: { emailRedirectTo: getAuthRedirectUrl("/auth?confirmed=1") },
         });
         if (error) throw error;
-        toast.success("Cuenta creada. Configurando tu terminal…");
+        if (data.session) {
+          toast.success("Cuenta creada. Continúa con la configuración de tu terminal.");
+          nav({ to: "/onboarding" });
+        } else {
+          setShowConfirmation(true);
+          setMode("signin");
+          toast.success("Cuenta creada. Confirma tu correo para continuar.");
+        }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        setShowConfirmation(false);
         toast.success("Acceso autorizado");
       }
     } catch (err: unknown) {
@@ -74,10 +88,32 @@ function AuthPage() {
           </p>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="glass-neon scanline relative space-y-4 p-6"
-        >
+        <form onSubmit={handleSubmit} className="glass-neon scanline relative space-y-4 p-6">
+          {showConfirmation && (
+            <div
+              role="status"
+              className="space-y-2 rounded-md border border-emerald-400/25 bg-emerald-400/[0.05] p-3 text-xs text-emerald-100"
+            >
+              <p className="font-semibold">Tu correo fue confirmado.</p>
+              <p>
+                Estás en el acceso oficial de Contalogic. Inicia sesión para guardar tu perfil y
+                activar la terminal.
+              </p>
+              {user && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConfirmation(false);
+                    nav({ to: profile?.onboarded ? "/dashboard" : "/onboarding" });
+                  }}
+                  className="font-semibold text-neon underline"
+                >
+                  Continuar a mi terminal
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-2">
             <button
               type="button"
@@ -149,10 +185,7 @@ function AuthPage() {
             </div>
             <div className="flex flex-col gap-2 pt-1 text-[10px] uppercase tracking-widest">
               {mode === "signin" ? (
-                <Link
-                  to="/forgot-password"
-                  className="font-mono text-neon hover:underline"
-                >
+                <Link to="/forgot-password" className="font-mono text-neon hover:underline">
                   ¿Olvidaste tu contraseña?
                 </Link>
               ) : (

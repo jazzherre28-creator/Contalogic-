@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import {
   BarChart,
   Bar,
@@ -20,13 +20,11 @@ import {
 } from "recharts";
 import {
   type FinanceRecord,
-  mergeFinanceRecords,
   computeCashFlowMetrics,
   buildCashFlowSeries,
   buildCashWaterfall,
 } from "@/lib/unified-finance";
-import { classifyTotals } from "@/lib/financial-analytics";
-import { useFinance } from "@/lib/finance-context";
+import { Link } from "@tanstack/react-router";
 
 const COLORS = ["#2563eb", "#10b981", "#eab308", "#ef4444", "#a855f7"];
 
@@ -37,8 +35,6 @@ const fmtCOP = (n: number) =>
   new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n);
 
 const tooltipStyle = { background: "#0a0a14", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8 };
-
-type DataMode = "combined" | "manual" | "ocr";
 
 function KpiTile({ label, value, color, sub }: { label: string; value: string; color: string; sub?: string }) {
   return (
@@ -72,58 +68,15 @@ function ChartPanel({
 
 export function CalculatorConsole({
   manualRecords,
-  ocrRecords,
-  ocrTotals,
-  ocrDocLabel,
 }: {
   manualRecords: FinanceRecord[];
-  ocrRecords: FinanceRecord[];
-  ocrTotals?: Record<string, number>;
-  ocrDocLabel?: string;
 }) {
-  const { datos } = useFinance();
-  const { ultimoCambio } = useFinance();
-
-  // Preferir modo combinado si el contexto global contiene datos OCR significativos
-  const contextHasOcrData = (datos.ingresos ?? 0) > 0 || (datos.activos ?? 0) > 0 || (datos.costos ?? 0) > 0;
-  const [mode, setMode] = useState<DataMode>(contextHasOcrData || ocrRecords.length > 0 ? "combined" : "manual");
   const [granularity, setGranularity] = useState<"day" | "week" | "month">("day");
-
-  useEffect(() => {
-    if (ultimoCambio?.tipo === "limpieza") {
-      // Forzar modo manual tras limpieza global
-      setMode("manual");
-      setGranularity("day");
-    }
-  }, [ultimoCambio]);
-
-  const records = useMemo(
-    () => mergeFinanceRecords(manualRecords, ocrRecords, mode),
-    [manualRecords, ocrRecords, mode]
-  );
+  const records = manualRecords;
 
   const metrics = useMemo(() => computeCashFlowMetrics(records), [records]);
   const series = useMemo(() => buildCashFlowSeries(records, granularity), [records, granularity]);
   const waterfall = useMemo(() => buildCashWaterfall(metrics), [metrics]);
-
-  const ocrSummary = useMemo(() => {
-    // Preferir totales desde el estado global si existen
-    const effectiveTotals: Record<string, number> = {};
-    if (datos && ((datos.ingresos ?? 0) > 0 || (datos.activos ?? 0) > 0 || (datos.costos ?? 0) > 0)) {
-      effectiveTotals.ingresos = datos.ingresos ?? 0;
-      effectiveTotals.costos = datos.costos ?? 0;
-      effectiveTotals.gastos = datos.gastos ?? 0;
-      effectiveTotals.activos = datos.activos ?? 0;
-      effectiveTotals.pasivos = datos.pasivos ?? 0;
-      effectiveTotals.patrimonio = datos.patrimonio ?? 0;
-    } else if (ocrTotals && Object.keys(ocrTotals).length > 0) {
-      Object.assign(effectiveTotals, ocrTotals);
-    } else {
-      return null;
-    }
-
-    return classifyTotals(effectiveTotals);
-  }, [ocrTotals, datos]);
 
   const byCategory = useMemo(() => {
     const map = new Map<string, { name: string; ingresos: number; egresos: number }>();
@@ -138,19 +91,12 @@ export function CalculatorConsole({
       .slice(0, 10);
   }, [records]);
 
-  const sourceCounts = useMemo(() => {
-    let manual = 0;
-    let ocr = 0;
-    records.forEach((r) => (r.source === "ocr" ? ocr++ : manual++));
-    return { manual, ocr, total: records.length };
-  }, [records]);
-
   if (records.length === 0) {
     return (
       <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-6 text-center">
         <p className="text-sm text-amber-100">
-          Registra movimientos en la calculadora o escanea un Balance/P&L en el{" "}
-          <span className="text-neon">Escáner OCR</span> para ver flujo de caja y gráficos.
+          Registra movimientos manuales para analizar el flujo de caja. Los estados OCR se analizan por separado en el{" "}
+          <Link to="/scanner" className="text-neon hover:underline">Escáner OCR</Link>.
         </p>
       </div>
     );
@@ -161,30 +107,10 @@ export function CalculatorConsole({
       {/* Header + fuentes */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[oklch(0.7_0.22_245/0.25)] bg-gradient-to-r from-[oklch(0.7_0.22_245/0.08)] to-transparent px-4 py-3">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-widest text-neon">Consola · Flujo de caja</div>
+          <div className="font-mono text-[10px] uppercase tracking-widest text-neon">Análisis manual · Flujo de caja</div>
           <div className="text-xs text-muted-foreground">
-            {sourceCounts.total} partidas · {sourceCounts.manual} manual · {sourceCounts.ocr} OCR
-            {ocrDocLabel && ` · ${ocrDocLabel}`}
+            {records.length} movimientos registrados · excluye estados OCR y registros sin origen confirmado
           </div>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {(["combined", "manual", "ocr"] as const).map((m) => {
-            if (m === "ocr" && ocrRecords.length === 0) return null;
-            const labels = { combined: "Combinado", manual: "Calculadora", ocr: "Solo OCR" };
-            return (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`rounded-md px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition ${
-                  mode === m
-                    ? "bg-neon/20 text-neon border border-neon/40"
-                    : "border border-white/10 text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {labels[m]}
-              </button>
-            );
-          })}
         </div>
       </div>
 
@@ -197,37 +123,24 @@ export function CalculatorConsole({
           value={fmtCOP(metrics.flujoNeto)}
           color={metrics.flujoNeto >= 0 ? "text-emerald-glow" : "text-destructive"}
         />
-        <KpiTile label="Margen flujo" value={`${metrics.margenFlujo.toFixed(1)}%`} color="text-neon" />
+        <KpiTile label="Margen flujo" value={metrics.margenFlujo == null ? "N/D" : `${metrics.margenFlujo.toFixed(1)}%`} color="text-neon" />
         <KpiTile
-          label="Quema mensual est."
-          value={fmtCOP(metrics.quemaMensual)}
+          label="Egreso mensual est."
+          value={metrics.quemaMensual == null ? "N/D" : fmtCOP(metrics.quemaMensual)}
           color="text-amber-300"
-          sub="egreso promedio × 30"
+          sub={metrics.quemaMensual == null ? "requiere 7 días observados" : "extrapolación del período observado"}
         />
         <KpiTile
           label="Runway"
           value={
             metrics.mesesRunway != null && isFinite(metrics.mesesRunway)
               ? `${metrics.mesesRunway.toFixed(1)} meses`
-              : "—"
+              : "N/D"
           }
           color="text-neon"
-          sub="con flujo actual"
+          sub="requiere saldo de caja disponible"
         />
       </div>
-
-      {ocrSummary && mode !== "manual" && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <KpiTile label="OCR · Ingresos" value={fmtCOP(ocrSummary.ingresos)} color="text-emerald-glow" />
-          <KpiTile label="OCR · Costos" value={fmtCOP(ocrSummary.costos)} color="text-rose-400" />
-          <KpiTile label="OCR · Gastos" value={fmtCOP(ocrSummary.gastos)} color="text-amber-300" />
-          <KpiTile
-            label="OCR · Utilidad est."
-            value={fmtCOP(ocrSummary.utilidadNeta)}
-            color={ocrSummary.utilidadNeta >= 0 ? "text-neon" : "text-destructive"}
-          />
-        </div>
-      )}
 
       <div className="flex gap-1">
         {(["day", "week", "month"] as const).map((g) => (
@@ -289,8 +202,8 @@ export function CalculatorConsole({
             <PieChart>
               <Pie
                 data={[
-                  { name: "Ingresos", value: Math.max(metrics.totalIngresos, 1) },
-                  { name: "Egresos", value: Math.max(metrics.totalEgresos, 1) },
+                  ...(metrics.totalIngresos > 0 ? [{ name: "Ingresos", value: metrics.totalIngresos }] : []),
+                  ...(metrics.totalEgresos > 0 ? [{ name: "Egresos", value: metrics.totalEgresos }] : []),
                 ]}
                 dataKey="value"
                 nameKey="name"

@@ -1,117 +1,25 @@
-/** Unifica movimientos manuales y partidas OCR para análisis y flujo de caja */
+/** Movimientos capturados manualmente y métricas de flujo de caja */
 
 export type FinanceRecord = {
   category: string;
   amount: number;
   kind: "income" | "expense";
   recorded_at: string;
-  source?: "manual" | "ocr";
+  source: "manual";
   note?: string | null;
 };
-
-const isIncomeLabel = (k: string) =>
-  /ingres|venta|honor|factur|operacional/i.test(k) &&
-  !/gasto|costo|egreso|pasiv|activ|deuda/i.test(k);
-
-const isExpenseLabel = (k: string) =>
-  (/gasto|costo|cmv|admin|marketing|nomina|sueld|arrend|deprec|amortiz|financ|interes/i.test(k) ||
-    /mercanc|materia|producci|servicio/i.test(k)) &&
-  !/ingres|venta|activ|patrim/i.test(k);
-
-export function ocrTotalsToRecords(
-  totals: Record<string, number>,
-  opts: { fileName?: string; docType?: "balance" | "pnl"; scannedAt?: string }
-): FinanceRecord[] {
-  const at = opts.scannedAt ?? new Date().toISOString();
-  const prefix = "[OCR] ";
-  const records: FinanceRecord[] = [];
-
-  const push = (label: string, value: number) => {
-    const abs = Math.abs(value);
-    const cleanLabel = label.startsWith(prefix) ? label : `${prefix}${label}`;
-
-    if (opts.docType === "balance") {
-      if (/activ|caja|banco|disponib|efectivo|cartera/i.test(label) && !/pasiv/i.test(label)) {
-        records.push({ category: cleanLabel, amount: abs, kind: "income", recorded_at: at, source: "ocr", note: opts.fileName ?? null });
-      } else if (/pasiv|deuda|oblig|proveed/i.test(label)) {
-        records.push({ category: cleanLabel, amount: abs, kind: "expense", recorded_at: at, source: "ocr", note: opts.fileName ?? null });
-      } else {
-        records.push({ category: cleanLabel, amount: abs, kind: value < 0 ? "expense" : "income", recorded_at: at, source: "ocr", note: opts.fileName ?? null });
-      }
-      return;
-    }
-
-    if (/debe|débito|debito/i.test(label)) {
-      records.push({ category: cleanLabel, amount: abs, kind: "expense", recorded_at: at, source: "ocr", note: opts.fileName ?? null });
-    } else if (/haber|crédito|credito/i.test(label)) {
-      records.push({ category: cleanLabel, amount: abs, kind: "income", recorded_at: at, source: "ocr", note: opts.fileName ?? null });
-    } else if (isIncomeLabel(label)) {
-      records.push({ category: cleanLabel, amount: abs, kind: "income", recorded_at: at, source: "ocr", note: opts.fileName ?? null });
-    } else if (isExpenseLabel(label)) {
-      records.push({ category: cleanLabel, amount: abs, kind: "expense", recorded_at: at, source: "ocr", note: opts.fileName ?? null });
-    } else {
-      records.push({ category: cleanLabel, amount: abs, kind: value < 0 ? "expense" : "income", recorded_at: at, source: "ocr", note: opts.fileName ?? null });
-    }
-  };
-
-  for (const [label, value] of Object.entries(totals)) {
-    if (!value || value === 0) continue;
-    push(label, value);
-  }
-
-  return records;
-}
-
-export function ocrLineItemsToRecords(
-  lineItems: Array<{ label: string; value: number }>,
-  opts: { fileName?: string; docType?: "balance" | "pnl"; scannedAt?: string }
-): FinanceRecord[] {
-  const records: FinanceRecord[] = [];
-  const seen = new Set<string>();
-  for (const item of lineItems) {
-    const key = `${item.label}:${item.value}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const batch = ocrTotalsToRecords({ [item.label]: item.value }, opts);
-    records.push(...batch);
-  }
-  return records;
-}
-
-export function ocrParsedToRecords(
-  parsed: { totals?: Record<string, number>; lineItems?: Array<{ label: string; value: number }> },
-  opts: { fileName?: string; docType?: "balance" | "pnl"; scannedAt?: string }
-): FinanceRecord[] {
-  if (parsed.lineItems && parsed.lineItems.length > 0) {
-    const fromLines = ocrLineItemsToRecords(parsed.lineItems, opts);
-    if (fromLines.length >= (Object.keys(parsed.totals ?? {}).length || 0)) {
-      return fromLines;
-    }
-  }
-  return ocrTotalsToRecords(parsed.totals ?? {}, opts);
-}
-
-export function mergeFinanceRecords(
-  manual: FinanceRecord[],
-  ocrBatches: FinanceRecord[],
-  mode: "manual" | "ocr" | "combined"
-): FinanceRecord[] {
-  if (mode === "manual") return manual;
-  if (mode === "ocr") return ocrBatches;
-  return [...manual, ...ocrBatches];
-}
 
 export type CashFlowMetrics = {
   totalIngresos: number;
   totalEgresos: number;
   flujoNeto: number;
-  margenFlujo: number;
+  margenFlujo: number | null;
   promedioIngresoDiario: number;
   promedioEgresoDiario: number;
-  quemaMensual: number;
+  quemaMensual: number | null;
   mesesRunway: number | null;
   diasConMovimiento: number;
-  ratioIngresoEgreso: number;
+  ratioIngresoEgreso: number | null;
 };
 
 export function computeCashFlowMetrics(records: FinanceRecord[]): CashFlowMetrics {
@@ -127,12 +35,20 @@ export function computeCashFlowMetrics(records: FinanceRecord[]): CashFlowMetric
   }
 
   const flujoNeto = totalIngresos - totalEgresos;
-  const margenFlujo = totalIngresos > 0 ? (flujoNeto / totalIngresos) * 100 : 0;
+  const margenFlujo = totalIngresos > 0 ? (flujoNeto / totalIngresos) * 100 : null;
   const dayCount = Math.max(1, days.size);
   const promedioIngresoDiario = totalIngresos / dayCount;
   const promedioEgresoDiario = totalEgresos / dayCount;
-  const quemaMensual = promedioEgresoDiario * 30;
-  const mesesRunway = quemaMensual > 0 && flujoNeto > 0 ? flujoNeto / quemaMensual : null;
+  const orderedDays = [...days].sort();
+  const observedDays = orderedDays.length > 0
+    ? Math.floor(
+        (Date.parse(`${orderedDays[orderedDays.length - 1]}T00:00:00Z`) -
+          Date.parse(`${orderedDays[0]}T00:00:00Z`)) /
+          86_400_000,
+      ) + 1
+    : 0;
+  const quemaMensual = observedDays >= 7 ? (totalEgresos / observedDays) * 30 : null;
+  const mesesRunway = null;
 
   return {
     totalIngresos,
@@ -144,7 +60,7 @@ export function computeCashFlowMetrics(records: FinanceRecord[]): CashFlowMetric
     quemaMensual,
     mesesRunway,
     diasConMovimiento: days.size,
-    ratioIngresoEgreso: totalEgresos > 0 ? totalIngresos / totalEgresos : totalIngresos > 0 ? Infinity : 0,
+    ratioIngresoEgreso: totalEgresos > 0 ? totalIngresos / totalEgresos : null,
   };
 }
 

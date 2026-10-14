@@ -37,13 +37,13 @@ export function PnLDisplay() {
 
   // Calcular cascada en tiempo real
   const cascada = useMemo(() => {
-    const utilidadBruta = datos.ingresos - datos.costos;
-    const utilidadNeta = datos.ingresos - datos.costos - datos.gastos;
+    const utilidadBruta = datos.utilidadBruta ?? datos.ingresos - datos.costos;
+    const utilidadNeta = datos.utilidadNeta ?? datos.ingresos - datos.costos - datos.gastos;
     const margenBruto = datos.ingresos > 0 ? (utilidadBruta / datos.ingresos) * 100 : 0;
     const margenNeto = datos.ingresos > 0 ? (utilidadNeta / datos.ingresos) * 100 : 0;
     
     return { utilidadBruta, utilidadNeta, margenBruto, margenNeto };
-  }, [datos.ingresos, datos.costos, datos.gastos]);
+  }, [datos.ingresos, datos.costos, datos.gastos, datos.utilidadBruta, datos.utilidadNeta]);
 
   const tieneData = datos.ingresos > 0 || datos.costos > 0 || datos.gastos > 0;
   const isPnlReady = datos.docType === "pnl" || datos.docType === "mixed";
