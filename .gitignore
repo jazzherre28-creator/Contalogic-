@@ -34,3 +34,6 @@ tmp-supabase*.mjs
 *.njsproj
 *.sln
 *.sw?
+
+.vercel
+.env*
