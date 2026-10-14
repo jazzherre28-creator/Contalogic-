@@ -3,12 +3,22 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { CATEGORIES, SECTOR_LABEL } from "@/lib/sectors";
-import { Calculator, Plus, Minus, Trash2, History, FileDown, FileSpreadsheet, BarChart3, ScanLine, RefreshCw } from "lucide-react";
+import {
+  Calculator,
+  Plus,
+  Minus,
+  Trash2,
+  History,
+  FileDown,
+  FileSpreadsheet,
+  BarChart3,
+  ScanLine,
+  RefreshCw,
+} from "lucide-react";
 import { toast } from "sonner";
 import { generateCalculatorReport } from "@/lib/pdf-report";
 import { exportCalculatorXLSX } from "@/lib/excel-report";
 import { CalculatorConsole } from "@/components/CalculatorConsole";
-import { TransportTripCalculator } from "@/components/TransportTripCalculator";
 import type { FinanceRecord } from "@/lib/unified-finance";
 import { Link } from "@tanstack/react-router";
 
@@ -26,10 +36,7 @@ type Rec = {
   source: "manual" | "ocr" | "legacy";
 };
 
-async function loadRecordsBySource(
-  userId: string,
-  source: Rec["source"],
-): Promise<Rec[]> {
+async function loadRecordsBySource(userId: string, source: Rec["source"]): Promise<Rec[]> {
   const pageSize = 1000;
   const records: Rec[] = [];
   for (let from = 0; ; from += pageSize) {
@@ -49,10 +56,7 @@ async function loadRecordsBySource(
 
 function CalculatorPage() {
   const { user, profile } = useAuth();
-  const cats = useMemo(
-    () => (profile?.sector ? CATEGORIES[profile.sector] : []),
-    [profile]
-  );
+  const cats = useMemo(() => (profile?.sector ? CATEGORIES[profile.sector] : []), [profile]);
   const [activeKey, setActiveKey] = useState<string>(cats[0]?.key ?? "");
   const [display, setDisplay] = useState("0");
   const [note, setNote] = useState("");
@@ -77,24 +81,25 @@ function CalculatorPage() {
   const loadHistory = async () => {
     if (!user) return;
     try {
-      const [recentResult, allRecordsResult, legacyRecordsResult, ocrRecordsResult, ocrResult] = await Promise.all([
-        supabase
-          .from("financial_records")
-          .select("*")
-          .eq("user_id", user.id)
-          .eq("source", "manual")
-          .order("recorded_at", { ascending: false })
-          .limit(15),
-        loadRecordsBySource(user.id, "manual"),
-        loadRecordsBySource(user.id, "legacy"),
-        loadRecordsBySource(user.id, "ocr"),
-        supabase
-          .from("ocr_documents")
-          .select("id, doc_type, file_name, created_at")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false })
-          .limit(5),
-      ]);
+      const [recentResult, allRecordsResult, legacyRecordsResult, ocrRecordsResult, ocrResult] =
+        await Promise.all([
+          supabase
+            .from("financial_records")
+            .select("*")
+            .eq("user_id", user.id)
+            .eq("source", "manual")
+            .order("recorded_at", { ascending: false })
+            .limit(15),
+          loadRecordsBySource(user.id, "manual"),
+          loadRecordsBySource(user.id, "legacy"),
+          loadRecordsBySource(user.id, "ocr"),
+          supabase
+            .from("ocr_documents")
+            .select("id, doc_type, file_name, created_at")
+            .eq("user_id", user.id)
+            .order("created_at", { ascending: false })
+            .limit(5),
+        ]);
       const failed = [recentResult, ocrResult].find((result) => result.error);
       if (failed?.error) throw failed.error;
       setHistory((recentResult.data ?? []) as Rec[]);
@@ -142,7 +147,7 @@ function CalculatorPage() {
       });
       if (error) throw error;
       toast.success(
-        `${activeCat.kind === "income" ? "Ingreso" : "Egreso"} registrado · ${activeCat.label}`
+        `${activeCat.kind === "income" ? "Ingreso" : "Egreso"} registrado · ${activeCat.label}`,
       );
       setDisplay("0");
       setNote("");
@@ -187,7 +192,7 @@ function CalculatorPage() {
         source: "manual" as const,
         note: r.note,
       })),
-    [allRecords]
+    [allRecords],
   );
 
   const classifyLegacyRecord = async (id: string, source: "manual" | "ocr") => {
@@ -203,7 +208,11 @@ function CalculatorPage() {
         .maybeSingle();
       if (error) throw error;
       if (!data) throw new Error("El registro ya fue clasificado o no está disponible.");
-      toast.success(source === "manual" ? "Registro incluido en análisis manual" : "Registro separado como origen OCR");
+      toast.success(
+        source === "manual"
+          ? "Registro incluido en análisis manual"
+          : "Registro separado como origen OCR",
+      );
       await loadHistory();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "No se pudo clasificar el registro");
@@ -213,7 +222,7 @@ function CalculatorPage() {
   const deleteManualRecords = async () => {
     if (!user || allRecords.length === 0) return;
     const ok = window.confirm(
-      `Se eliminarán ${allRecords.length} movimientos manuales. Los documentos OCR y los registros sin origen confirmado se conservarán. ¿Deseas continuar?`
+      `Se eliminarán ${allRecords.length} movimientos manuales. Los documentos OCR y los registros sin origen confirmado se conservarán. ¿Deseas continuar?`,
     );
     if (!ok) return;
     try {
@@ -337,51 +346,51 @@ function CalculatorPage() {
             <h3 className="text-sm font-semibold">Movimientos recientes</h3>
           </div>
           <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => {
-              if (allRecords.length === 0) {
-                toast.error("Sin movimientos para reportar");
-                return;
-              }
-              generateCalculatorReport({
-                profile: profile ?? {},
-                records: allRecords.map((r) => ({
-                  category: r.category,
-                  amount: Number(r.amount),
-                  kind: r.kind,
-                  note: r.note,
-                  recorded_at: r.recorded_at,
-                })),
-              });
-              toast.success("Reporte PDF generado");
-            }}
-            disabled={allRecords.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[oklch(0.92_0.2_105/0.5)] bg-[oklch(0.92_0.2_105/0.1)] px-2.5 py-1 text-[11px] font-semibold text-emerald-glow transition hover:bg-[oklch(0.92_0.2_105/0.2)]"
-          >
-            <FileDown className="h-3 w-3" /> PDF
-          </button>
-          <button
-            onClick={() => {
-              if (allRecords.length === 0) {
-                toast.error("Sin movimientos para exportar");
-                return;
-              }
-              exportCalculatorXLSX({
-                records: allRecords.map((r) => ({
-                  category: r.category,
-                  amount: Number(r.amount),
-                  kind: r.kind,
-                  note: r.note,
-                  recorded_at: r.recorded_at,
-                })),
-              });
-              toast.success("Excel generado");
-            }}
-            disabled={allRecords.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[oklch(0.7_0.22_245/0.5)] bg-[oklch(0.7_0.22_245/0.1)] px-2.5 py-1 text-[11px] font-semibold text-neon transition hover:bg-[oklch(0.7_0.22_245/0.2)]"
-          >
-            <FileSpreadsheet className="h-3 w-3" /> Excel
-          </button>
+            <button
+              onClick={() => {
+                if (allRecords.length === 0) {
+                  toast.error("Sin movimientos para reportar");
+                  return;
+                }
+                generateCalculatorReport({
+                  profile: profile ?? {},
+                  records: allRecords.map((r) => ({
+                    category: r.category,
+                    amount: Number(r.amount),
+                    kind: r.kind,
+                    note: r.note,
+                    recorded_at: r.recorded_at,
+                  })),
+                });
+                toast.success("Reporte PDF generado");
+              }}
+              disabled={allRecords.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[oklch(0.92_0.2_105/0.5)] bg-[oklch(0.92_0.2_105/0.1)] px-2.5 py-1 text-[11px] font-semibold text-emerald-glow transition hover:bg-[oklch(0.92_0.2_105/0.2)]"
+            >
+              <FileDown className="h-3 w-3" /> PDF
+            </button>
+            <button
+              onClick={() => {
+                if (allRecords.length === 0) {
+                  toast.error("Sin movimientos para exportar");
+                  return;
+                }
+                exportCalculatorXLSX({
+                  records: allRecords.map((r) => ({
+                    category: r.category,
+                    amount: Number(r.amount),
+                    kind: r.kind,
+                    note: r.note,
+                    recorded_at: r.recorded_at,
+                  })),
+                });
+                toast.success("Excel generado");
+              }}
+              disabled={allRecords.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[oklch(0.7_0.22_245/0.5)] bg-[oklch(0.7_0.22_245/0.1)] px-2.5 py-1 text-[11px] font-semibold text-neon transition hover:bg-[oklch(0.7_0.22_245/0.2)]"
+            >
+              <FileSpreadsheet className="h-3 w-3" /> Excel
+            </button>
           </div>
         </div>
         {history.length === 0 ? (
@@ -429,7 +438,8 @@ function CalculatorPage() {
             <div>
               <h3 className="text-sm font-semibold">Análisis de movimientos manuales</h3>
               <p className="text-xs text-muted-foreground">
-                Solo incluye registros capturados en esta calculadora; OCR y origen pendiente quedan fuera.
+                Solo incluye registros capturados en esta calculadora; OCR y origen pendiente quedan
+                fuera.
               </p>
             </div>
           </div>
@@ -452,28 +462,30 @@ function CalculatorPage() {
         <CalculatorConsole manualRecords={manualFinance} />
       </div>
 
-        {profile?.sector === "transporte" && user && (
-          <TransportTripCalculator userId={user.id} />
-        )}
-
-        {legacyRecords.length > 0 && (
+      {legacyRecords.length > 0 && (
         <section className="glass space-y-3 p-5 lg:col-span-2">
           <div>
             <h3 className="text-sm font-semibold text-amber-300">
               Registros antiguos sin origen confirmado ({legacyRecords.length})
             </h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Se excluyen de los indicadores y reportes para evitar mezclar movimientos manuales con importaciones OCR.
-              Confirma el origen de cada registro antes de incluirlo.
+              Se excluyen de los indicadores y reportes para evitar mezclar movimientos manuales con
+              importaciones OCR. Confirma el origen de cada registro antes de incluirlo.
             </p>
           </div>
           <ul className="space-y-2">
             {legacyRecords.map((record) => (
-              <li key={record.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/15 bg-amber-500/[0.03] px-3 py-2">
+              <li
+                key={record.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/15 bg-amber-500/[0.03] px-3 py-2"
+              >
                 <div>
-                  <div className="text-sm font-medium">{record.category} · {fmt(record.amount)}</div>
+                  <div className="text-sm font-medium">
+                    {record.category} · {fmt(record.amount)}
+                  </div>
                   <div className="text-[10px] text-muted-foreground">
-                    {record.kind === "income" ? "Ingreso" : "Egreso"} · {new Date(record.recorded_at).toLocaleString("es-CO")}
+                    {record.kind === "income" ? "Ingreso" : "Egreso"} ·{" "}
+                    {new Date(record.recorded_at).toLocaleString("es-CO")}
                     {record.note ? ` · ${record.note}` : ""}
                   </div>
                 </div>
@@ -503,7 +515,8 @@ function CalculatorPage() {
             Partidas OCR separadas ({ocrImportedRecords.length})
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Estas partidas se conservan fuera del flujo de caja manual. Consulta el documento y su análisis en el escáner.
+            Estas partidas se conservan fuera del flujo de caja manual. Consulta el documento y su
+            análisis en el escáner.
           </p>
         </section>
       )}
@@ -511,7 +524,9 @@ function CalculatorPage() {
       <section className="glass p-5 lg:col-span-2">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-neon">Documentos OCR · análisis independiente</h3>
+            <h3 className="text-sm font-semibold text-neon">
+              Documentos OCR · análisis independiente
+            </h3>
             <p className="mt-1 text-xs text-muted-foreground">
               Los saldos y subtotales del balance/P&amp;L no se convierten en movimientos de caja.
             </p>
@@ -528,14 +543,24 @@ function CalculatorPage() {
         ) : (
           <ul className="space-y-2">
             {ocrDocs.map((doc) => (
-              <li key={doc.id} className="flex items-center justify-between gap-3 rounded-md border border-white/5 bg-white/[0.02] px-3 py-2">
+              <li
+                key={doc.id}
+                className="flex items-center justify-between gap-3 rounded-md border border-white/5 bg-white/[0.02] px-3 py-2"
+              >
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{doc.file_name ?? "Documento sin nombre"}</div>
+                  <div className="truncate text-sm font-medium">
+                    {doc.file_name ?? "Documento sin nombre"}
+                  </div>
                   <div className="text-[10px] text-muted-foreground">
-                    {doc.doc_type === "balance" ? "Estado de situación financiera" : "Estado de resultados"} · {new Date(doc.created_at).toLocaleString("es-CO")}
+                    {doc.doc_type === "balance"
+                      ? "Estado de situación financiera"
+                      : "Estado de resultados"}{" "}
+                    · {new Date(doc.created_at).toLocaleString("es-CO")}
                   </div>
                 </div>
-                <span className="shrink-0 rounded border border-neon/20 px-2 py-0.5 text-[9px] font-mono uppercase text-neon">OCR</span>
+                <span className="shrink-0 rounded border border-neon/20 px-2 py-0.5 text-[9px] font-mono uppercase text-neon">
+                  OCR
+                </span>
               </li>
             ))}
           </ul>

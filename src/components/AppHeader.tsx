@@ -12,6 +12,7 @@ import {
   BookMarked,
   MoreHorizontal,
   TrendingDown,
+  Truck,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useRoles } from "@/hooks/use-roles";
@@ -34,9 +35,24 @@ const PRIMARY = [
 ] as const;
 
 const MORE = [
-  { to: "/tax-savings", label: "Ahorro de impuestos", desc: "Estrategias y deducciones", icon: TrendingDown },
-  { to: "/calendar", label: "Calendario DIAN", desc: "Vencimientos tributarios", icon: CalendarDays },
-  { to: "/dictionary", label: "Diccionario tributario", desc: "Términos del Estatuto", icon: BookOpen },
+  {
+    to: "/tax-savings",
+    label: "Ahorro de impuestos",
+    desc: "Estrategias y deducciones",
+    icon: TrendingDown,
+  },
+  {
+    to: "/calendar",
+    label: "Calendario DIAN",
+    desc: "Vencimientos tributarios",
+    icon: CalendarDays,
+  },
+  {
+    to: "/dictionary",
+    label: "Diccionario tributario",
+    desc: "Términos del Estatuto",
+    icon: BookOpen,
+  },
   { to: "/manual", label: "Manual de usuario", desc: "Guía de la terminal", icon: BookMarked },
 ] as const;
 
@@ -61,9 +77,7 @@ export function AppHeader() {
             <div className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
               Contalogic AI+
             </div>
-            <div className="text-sm font-semibold text-neon">
-              Terminal Financiera Universal
-            </div>
+            <div className="text-sm font-semibold text-neon">Terminal Financiera Universal</div>
           </div>
         </Link>
 
@@ -85,6 +99,20 @@ export function AppHeader() {
               </Link>
             );
           })}
+
+          {profile?.sector === "transporte" && (
+            <Link
+              to="/calcutrans"
+              className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${
+                loc.pathname === "/calcutrans"
+                  ? "bg-[oklch(0.7_0.22_245/0.12)] text-neon shadow-[inset_0_0_0_1px_oklch(0.7_0.22_245/0.45)]"
+                  : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+              }`}
+            >
+              <Truck className="h-4 w-4" />
+              <span>CalcuTrans</span>
+            </Link>
+          )}
 
           {/* Menú Más — portal sólido para legibilidad */}
           <DropdownMenu>
@@ -112,14 +140,20 @@ export function AppHeader() {
               {MORE.map(({ to, label, desc, icon: Icon }) => {
                 const active = loc.pathname === to;
                 return (
-                  <DropdownMenuItem key={to} asChild className="cursor-pointer rounded-md p-0 focus:bg-[oklch(0.7_0.22_245/0.15)]">
+                  <DropdownMenuItem
+                    key={to}
+                    asChild
+                    className="cursor-pointer rounded-md p-0 focus:bg-[oklch(0.7_0.22_245/0.15)]"
+                  >
                     <Link
                       to={to}
                       className={`flex w-full items-start gap-3 px-3 py-2.5 ${
                         active ? "bg-[oklch(0.7_0.22_245/0.12)] text-neon" : "text-slate-100"
                       }`}
                     >
-                      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${active ? "text-neon" : "text-slate-400"}`} />
+                      <Icon
+                        className={`mt-0.5 h-4 w-4 shrink-0 ${active ? "text-neon" : "text-slate-400"}`}
+                      />
                       <div className="min-w-0">
                         <div className="text-sm font-medium leading-tight">{label}</div>
                         <div className="mt-0.5 text-[11px] leading-snug text-slate-400">{desc}</div>
@@ -160,11 +194,7 @@ export function AppHeader() {
               </span>
             </div>
           )}
-          <button
-            onClick={signOut}
-            className="btn-neon !px-2.5 !py-2"
-            title="Cerrar sesión"
-          >
+          <button onClick={signOut} className="btn-neon !px-2.5 !py-2" title="Cerrar sesión">
             <LogOut className="h-4 w-4" />
           </button>
         </div>

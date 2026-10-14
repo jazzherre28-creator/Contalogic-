@@ -11,6 +11,7 @@ import {
 } from "@/lib/financial-analytics";
 import { computeTaxSavings } from "@/lib/tax-savings";
 import { computeCashFlowMetrics } from "@/lib/unified-finance";
+import { computeTransportTripMetrics, type TransportTrip } from "@/lib/transport-analytics";
 
 export type ReportProfile = {
   display_name?: string | null;
@@ -119,9 +120,7 @@ function drawTable(doc: jsPDF, opts: Parameters<typeof autoTable>[1]) {
 /* ─── Datos tributarios reportados y requisitos de información ─── */
 type TaxRow = { concept: string; base: string; rate: string; amount: string };
 
-function buildTaxProjection(
-  impuestoRentaReportado?: number,
-): { rows: TaxRow[]; note: string } {
+function buildTaxProjection(impuestoRentaReportado?: number): { rows: TaxRow[]; note: string } {
   const rows: TaxRow[] = [
     { concept: "IVA generado", base: "Requiere ventas gravadas", rate: "N/D", amount: "N/D" },
     {
@@ -253,7 +252,11 @@ function footer(doc: jsPDF) {
     doc.line(M, FOOTER - 5, 210 - M, FOOTER - 5);
     doc.setFontSize(7);
     doc.setTextColor(...MUTED);
-    doc.text("Confidencial · Contalogic AI+ · Estatuto Tributario Colombiano (referencia)", M, FOOTER);
+    doc.text(
+      "Confidencial · Contalogic AI+ · Estatuto Tributario Colombiano (referencia)",
+      M,
+      FOOTER,
+    );
     doc.text(`${i} / ${n}`, 210 - M, FOOTER, { align: "right" });
   }
 }
@@ -295,7 +298,9 @@ function kpiGrid(
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7);
     doc.setTextColor(...MUTED);
-    wrap(doc, item.label.toUpperCase(), cw - 8).forEach((l, li) => doc.text(l, x + 4, yy + 6 + li * 3.2));
+    wrap(doc, item.label.toUpperCase(), cw - 8).forEach((l, li) =>
+      doc.text(l, x + 4, yy + 6 + li * 3.2),
+    );
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(12);
@@ -514,11 +519,7 @@ export function generateDashboardReport(args: {
   y = savingsTable(
     doc,
     y,
-    buildFiscalSavingsRows(
-      { Ingresos: totals.income, Gastos: totals.expense },
-      profile,
-      "pnl",
-    ),
+    buildFiscalSavingsRows({ Ingresos: totals.income, Gastos: totals.expense }, profile, "pnl"),
   );
 
   footer(doc);
@@ -527,10 +528,18 @@ export function generateDashboardReport(args: {
 
 export function generateCalculatorReport(args: {
   profile: ReportProfile;
-  records: Array<{ category: string; amount: number; kind: string; note: string | null; recorded_at: string }>;
+  records: Array<{
+    category: string;
+    amount: number;
+    kind: string;
+    note: string | null;
+    recorded_at: string;
+  }>;
 }) {
   const { profile, records } = args;
-  const sorted = [...records].sort((a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime());
+  const sorted = [...records].sort(
+    (a, b) => new Date(b.recorded_at).getTime() - new Date(a.recorded_at).getTime(),
+  );
 
   let income = 0;
   let expense = 0;
@@ -543,7 +552,7 @@ export function generateCalculatorReport(args: {
   const cashMetrics = computeCashFlowMetrics(
     records.map((record) => ({
       ...record,
-      kind: record.kind === "income" ? "income" as const : "expense" as const,
+      kind: record.kind === "income" ? ("income" as const) : ("expense" as const),
       source: "manual" as const,
     })),
   );
@@ -571,7 +580,11 @@ export function generateCalculatorReport(args: {
   y = kpiGrid(doc, y, [
     { label: "Ingresos", value: fmtCompact(income) },
     { label: "Egresos", value: fmtCompact(expense) },
-    { label: "Saldo neto", value: fmtCompact(balance), hint: margen != null ? fmtPct(margen) : undefined },
+    {
+      label: "Saldo neto",
+      value: fmtCompact(balance),
+      hint: margen != null ? fmtPct(margen) : undefined,
+    },
     { label: "Registros", value: String(records.length) },
     { label: "Egreso mensual aprox.", value: fmtOptionalCompact(cashMetrics.quemaMensual) },
     { label: "Runway", value: "N/D", hint: "requiere saldo de caja disponible" },
@@ -589,7 +602,11 @@ export function generateCalculatorReport(args: {
     body: [...byCat.entries()]
       .sort((a, b) => b[1].in + b[1].out - (a[1].in + a[1].out))
       .map(([cat, v]) => [cat, fmtCOP(v.in), fmtCOP(v.out), fmtCOP(v.in - v.out)]),
-    columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right", fontStyle: "bold" } },
+    columnStyles: {
+      1: { halign: "right" },
+      2: { halign: "right" },
+      3: { halign: "right", fontStyle: "bold" },
+    },
   });
   y = tableEnd(doc);
 
@@ -640,19 +657,13 @@ export function generateScannerReport(args: {
   const quality = dataQualityScore(Object.keys(totals).filter((k) => totals[k] !== 0).length);
   const margenBruto =
     c.hasGrossProfit && c.ingresos > 0 ? (c.utilidadBruta / c.ingresos) * 100 : null;
-  const margenNeto =
-    c.hasNetIncome && c.ingresos > 0 ? (c.utilidadNeta / c.ingresos) * 100 : null;
+  const margenNeto = c.hasNetIncome && c.ingresos > 0 ? (c.utilidadNeta / c.ingresos) * 100 : null;
 
   const doc = new jsPDF();
-  const docLabel = type === "balance" ? "Estado de situacion financiera" : "Estado de resultados (P&L)";
+  const docLabel =
+    type === "balance" ? "Estado de situacion financiera" : "Estado de resultados (P&L)";
 
-  let y = header(
-    doc,
-    "Analisis OCR",
-    `${docLabel} · ${fileName}`,
-    profile,
-    "ESCANER",
-  );
+  let y = header(doc, "Analisis OCR", `${docLabel} · ${fileName}`, profile, "ESCANER");
 
   /* --- KPIs segun tipo de documento --- */
   y = section(doc, y, "1", "Cifras principales");
@@ -662,7 +673,10 @@ export function generateScannerReport(args: {
     const canVerifyEquation = c.hasTotalAssets && c.hasTotalLiabilities && c.hasEquity;
     y = kpiGrid(doc, y, [
       { label: "Total activos", value: fmtOptionalCompact(c.hasTotalAssets ? c.activos : null) },
-      { label: "Total pasivos", value: fmtOptionalCompact(c.hasTotalLiabilities ? c.pasivos : null) },
+      {
+        label: "Total pasivos",
+        value: fmtOptionalCompact(c.hasTotalLiabilities ? c.pasivos : null),
+      },
       { label: "Patrimonio", value: fmtOptionalCompact(c.hasEquity ? c.patrimonio : null) },
       {
         label: "Capital de trabajo",
@@ -682,16 +696,28 @@ export function generateScannerReport(args: {
         cuadra ? "ok" : "warn",
       );
     } else {
-      y = diagnosis(doc, y, "No se puede verificar A = P + Patrimonio: faltan uno o mas totales en el documento.", "warn");
+      y = diagnosis(
+        doc,
+        y,
+        "No se puede verificar A = P + Patrimonio: faltan uno o mas totales en el documento.",
+        "warn",
+      );
     }
   } else {
     const utilidad = c.hasNetIncome ? c.utilidadNeta : null;
     const mn = utilidad != null && c.ingresos > 0 ? (utilidad / c.ingresos) * 100 : null;
     y = kpiGrid(doc, y, [
-      { label: "Ingresos", value: fmtOptionalCompact(c.ingresosEntries.length > 0 ? c.ingresos : null) },
+      {
+        label: "Ingresos",
+        value: fmtOptionalCompact(c.ingresosEntries.length > 0 ? c.ingresos : null),
+      },
       { label: "Costos", value: fmtOptionalCompact(c.costEntries.length > 0 ? c.costos : null) },
       { label: "Gastos", value: fmtOptionalCompact(c.expenseEntries.length > 0 ? c.gastos : null) },
-      { label: "Utilidad neta", value: fmtOptionalCompact(utilidad), hint: mn != null ? `Margen ${fmtPct(mn)}` : undefined },
+      {
+        label: "Utilidad neta",
+        value: fmtOptionalCompact(utilidad),
+        hint: mn != null ? `Margen ${fmtPct(mn)}` : undefined,
+      },
     ]);
     y = diagnosis(
       doc,
@@ -744,7 +770,10 @@ export function generateScannerReport(args: {
         ["Activos no corrientes", fmtCOP(c.hasNonCurrentAssets ? c.activosNoCorrientes : null)],
         ["Total activos", fmtCOP(c.hasTotalAssets ? c.activos : null)],
         ["Pasivos corrientes", fmtCOP(c.hasCurrentLiabilities ? c.pasivosCorrientes : null)],
-        ["Pasivos no corrientes", fmtCOP(c.hasNonCurrentLiabilities ? c.pasivosNoCorrientes : null)],
+        [
+          "Pasivos no corrientes",
+          fmtCOP(c.hasNonCurrentLiabilities ? c.pasivosNoCorrientes : null),
+        ],
         ["Total pasivos", fmtCOP(c.hasTotalLiabilities ? c.pasivos : null)],
         ["Patrimonio", fmtCOP(c.hasEquity ? c.patrimonio : null)],
         [
@@ -759,14 +788,36 @@ export function generateScannerReport(args: {
       startY: y,
       head: [["Concepto", "Valor (COP)", "% s/ ingresos"]],
       body: [
-        ["Ingresos operacionales", fmtCOP(c.ingresosEntries.length > 0 ? c.ingresos : null), c.ingresosEntries.length > 0 ? "100%" : "N/D"],
-        ["Costo de ventas", fmtCOP(c.costEntries.length > 0 ? c.costos : null), fmtPct(c.ingresos > 0 && c.costEntries.length > 0 ? (c.costos / c.ingresos) * 100 : null)],
+        [
+          "Ingresos operacionales",
+          fmtCOP(c.ingresosEntries.length > 0 ? c.ingresos : null),
+          c.ingresosEntries.length > 0 ? "100%" : "N/D",
+        ],
+        [
+          "Costo de ventas",
+          fmtCOP(c.costEntries.length > 0 ? c.costos : null),
+          fmtPct(c.ingresos > 0 && c.costEntries.length > 0 ? (c.costos / c.ingresos) * 100 : null),
+        ],
         ["Utilidad bruta", fmtCOP(c.hasGrossProfit ? c.utilidadBruta : null), fmtPct(margenBruto)],
-        ["Gastos operacionales", fmtCOP(c.expenseEntries.length > 0 ? c.gastos : null), fmtPct(c.ingresos > 0 && c.expenseEntries.length > 0 ? (c.gastos / c.ingresos) * 100 : null)],
-        ...(c.otrosIngresosOperativos !== 0 ? [["Otros ingresos operativos", fmtCOP(c.otrosIngresosOperativos), "—"]] : []),
-        ...(c.ingresosFinancieros !== 0 ? [["Ingresos financieros", fmtCOP(c.ingresosFinancieros), "—"]] : []),
-        ...(c.gastosFinancieros !== 0 ? [["Gastos financieros", fmtCOP(c.gastosFinancieros), "—"]] : []),
-        ...(c.hasProfitBeforeTax ? [["Utilidad antes de impuestos", fmtCOP(c.utilidadAntesImpuestos), "—"]] : []),
+        [
+          "Gastos operacionales",
+          fmtCOP(c.expenseEntries.length > 0 ? c.gastos : null),
+          fmtPct(
+            c.ingresos > 0 && c.expenseEntries.length > 0 ? (c.gastos / c.ingresos) * 100 : null,
+          ),
+        ],
+        ...(c.otrosIngresosOperativos !== 0
+          ? [["Otros ingresos operativos", fmtCOP(c.otrosIngresosOperativos), "—"]]
+          : []),
+        ...(c.ingresosFinancieros !== 0
+          ? [["Ingresos financieros", fmtCOP(c.ingresosFinancieros), "—"]]
+          : []),
+        ...(c.gastosFinancieros !== 0
+          ? [["Gastos financieros", fmtCOP(c.gastosFinancieros), "—"]]
+          : []),
+        ...(c.hasProfitBeforeTax
+          ? [["Utilidad antes de impuestos", fmtCOP(c.utilidadAntesImpuestos), "—"]]
+          : []),
         ...(c.hasIncomeTax ? [["Impuesto de renta reportado", fmtCOP(c.impuestoRenta), "—"]] : []),
         ["Utilidad neta", fmtCOP(c.hasNetIncome ? c.utilidadNeta : null), fmtPct(margenNeto)],
       ],
@@ -869,7 +920,13 @@ export function generateBalanceReport(args: {
       : cuadra
         ? `Balance cuadrado. Capital de trabajo: ${fmtCOP(capitalTrabajo)}.`
         : `Descuadre de ${fmtCOP(dif)} entre activos y (pasivos + patrimonio).`,
-    !canVerifyEquation ? "warn" : cuadra ? (capitalTrabajo != null && capitalTrabajo >= 0 ? "ok" : "warn") : "bad",
+    !canVerifyEquation
+      ? "warn"
+      : cuadra
+        ? capitalTrabajo != null && capitalTrabajo >= 0
+          ? "ok"
+          : "warn"
+        : "bad",
   );
 
   y = section(doc, y, "2", "Balance general");
@@ -877,12 +934,31 @@ export function generateBalanceReport(args: {
     startY: y,
     head: [["Rubro", "Corriente", "No corriente", "Total"]],
     body: [
-      ["Activos", fmtCOP(c.hasCurrentAssets ? datos.activosCorrientes : null), fmtCOP(c.hasNonCurrentAssets ? datos.activosNoCorrientes : null), fmtCOP(c.hasTotalAssets ? datos.activos : null)],
-      ["Pasivos", fmtCOP(c.hasCurrentLiabilities ? datos.pasivosCorrientes : null), fmtCOP(c.hasNonCurrentLiabilities ? datos.pasivosNoCorrientes : null), fmtCOP(c.hasTotalLiabilities ? datos.pasivos : null)],
+      [
+        "Activos",
+        fmtCOP(c.hasCurrentAssets ? datos.activosCorrientes : null),
+        fmtCOP(c.hasNonCurrentAssets ? datos.activosNoCorrientes : null),
+        fmtCOP(c.hasTotalAssets ? datos.activos : null),
+      ],
+      [
+        "Pasivos",
+        fmtCOP(c.hasCurrentLiabilities ? datos.pasivosCorrientes : null),
+        fmtCOP(c.hasNonCurrentLiabilities ? datos.pasivosNoCorrientes : null),
+        fmtCOP(c.hasTotalLiabilities ? datos.pasivos : null),
+      ],
       ["Patrimonio", "—", "—", fmtCOP(c.hasEquity ? datos.patrimonio : null)],
-      ["Verificacion A = P + Pat", "—", "—", canVerifyEquation ? (cuadra ? "Cuadra" : fmtCOP(dif)) : "N/D"],
+      [
+        "Verificacion A = P + Pat",
+        "—",
+        "—",
+        canVerifyEquation ? (cuadra ? "Cuadra" : fmtCOP(dif)) : "N/D",
+      ],
     ],
-    columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right", fontStyle: "bold" } },
+    columnStyles: {
+      1: { halign: "right" },
+      2: { halign: "right" },
+      3: { halign: "right", fontStyle: "bold" },
+    },
   });
   y = tableEnd(doc);
 
@@ -904,7 +980,9 @@ export function generateBalanceReport(args: {
 
   y = section(doc, y, "6", "Recomendaciones");
   y = bullets(doc, y, [
-    cuadra ? "Mantenga conciliacion mensual de activos, pasivos y patrimonio." : "Corrija el descuadre antes de presentar estados financieros.",
+    cuadra
+      ? "Mantenga conciliacion mensual de activos, pasivos y patrimonio."
+      : "Corrija el descuadre antes de presentar estados financieros.",
     "Meta de liquidez corriente: 1,5x o superior.",
     capitalTrabajo == null
       ? "Complete activos y pasivos corrientes para calcular capital de trabajo."
@@ -922,22 +1000,21 @@ export function generatePnLReport(args: {
   datos: DatosFinancierosGlobales;
 }) {
   const { profile, datos } = args;
-  const hasIncomeTax = datos.source === "ocr"
-    ? datos.tieneImpuestoRenta === true
-    : datos.impuestoRenta != null;
-  const hasNetIncome = datos.source === "ocr"
-    ? datos.tieneUtilidadNeta === true
-    : datos.utilidadNeta != null;
+  const hasIncomeTax =
+    datos.source === "ocr" ? datos.tieneImpuestoRenta === true : datos.impuestoRenta != null;
+  const hasNetIncome =
+    datos.source === "ocr" ? datos.tieneUtilidadNeta === true : datos.utilidadNeta != null;
   const gastoOperativo = Math.max(
     0,
-    datos.gastos - (datos.gastosFinancieros ?? 0) - (hasIncomeTax ? datos.impuestoRenta ?? 0 : 0),
+    datos.gastos - (datos.gastosFinancieros ?? 0) - (hasIncomeTax ? (datos.impuestoRenta ?? 0) : 0),
   );
   const totals: Record<string, number> = {
     "Ingresos operacionales": datos.ingresos,
     "Costo de ventas": -datos.costos,
     "Gastos operacionales": -gastoOperativo,
   };
-  if (datos.otrosIngresosOperativos) totals["Otros ingresos operativos"] = datos.otrosIngresosOperativos;
+  if (datos.otrosIngresosOperativos)
+    totals["Otros ingresos operativos"] = datos.otrosIngresosOperativos;
   if (datos.ingresosFinancieros) totals["Ingresos financieros"] = datos.ingresosFinancieros;
   if (datos.gastosFinancieros) totals["Gastos financieros"] = -datos.gastosFinancieros;
   if (hasIncomeTax) totals["Impuesto de renta"] = -(datos.impuestoRenta ?? 0);
@@ -953,7 +1030,7 @@ export function generatePnLReport(args: {
   const hasCostos = datos.source !== "ocr" || c.costEntries.length > 0;
   const hasGastos = datos.source !== "ocr" || c.expenseEntries.length > 0;
   const indicators = computePnLIndicators(c);
-  const tax = buildTaxProjection(hasIncomeTax ? datos.impuestoRenta ?? 0 : undefined);
+  const tax = buildTaxProjection(hasIncomeTax ? (datos.impuestoRenta ?? 0) : undefined);
 
   const doc = new jsPDF();
   let y = header(
@@ -964,15 +1041,25 @@ export function generatePnLReport(args: {
     "P&L",
   );
 
-  const mb = utilidadBruta != null && datos.ingresos > 0 ? (utilidadBruta / datos.ingresos) * 100 : null;
-  const mn = utilidadNeta != null && datos.ingresos > 0 ? (utilidadNeta / datos.ingresos) * 100 : null;
+  const mb =
+    utilidadBruta != null && datos.ingresos > 0 ? (utilidadBruta / datos.ingresos) * 100 : null;
+  const mn =
+    utilidadNeta != null && datos.ingresos > 0 ? (utilidadNeta / datos.ingresos) * 100 : null;
 
   y = section(doc, y, "1", "Resumen de resultados");
   y = kpiGrid(doc, y, [
     { label: "Ingresos", value: fmtOptionalCompact(hasIngresos ? datos.ingresos : null) },
     { label: "Costos", value: fmtOptionalCompact(hasCostos ? datos.costos : null) },
-    { label: "Utilidad bruta", value: fmtOptionalCompact(utilidadBruta), hint: mb != null ? fmtPct(mb) : undefined },
-    { label: "Utilidad neta", value: fmtOptionalCompact(utilidadNeta), hint: mn != null ? fmtPct(mn) : undefined },
+    {
+      label: "Utilidad bruta",
+      value: fmtOptionalCompact(utilidadBruta),
+      hint: mb != null ? fmtPct(mb) : undefined,
+    },
+    {
+      label: "Utilidad neta",
+      value: fmtOptionalCompact(utilidadNeta),
+      hint: mn != null ? fmtPct(mn) : undefined,
+    },
   ]);
 
   y = diagnosis(
@@ -983,7 +1070,13 @@ export function generatePnLReport(args: {
       : utilidadNeta >= 0
         ? `Utilidad neta reportada ${fmtCOP(utilidadNeta)}. No se infiere una carga tributaria total.`
         : `Perdida neta reportada de ${fmtCOP(Math.abs(utilidadNeta))}. Revise estructura de costos y gastos.`,
-    utilidadNeta == null ? "warn" : utilidadNeta >= 0 ? (mn != null && mn >= 8 ? "ok" : "warn") : "bad",
+    utilidadNeta == null
+      ? "warn"
+      : utilidadNeta >= 0
+        ? mn != null && mn >= 8
+          ? "ok"
+          : "warn"
+        : "bad",
   );
   if (utilidadBruta != null && datos.ingresos > 0 && datos.costos > 0) {
     const utilidadBrutaFormula = datos.ingresos - datos.costos;
@@ -1027,15 +1120,43 @@ export function generatePnLReport(args: {
     startY: y,
     head: [["Concepto", "Valor (COP)", "% ingresos"]],
     body: [
-      ["(+) Ingresos operacionales", fmtCOP(hasIngresos ? datos.ingresos : null), hasIngresos ? "100%" : "N/D"],
-      ["(-) Costo de ventas", fmtCOP(hasCostos ? datos.costos : null), fmtPct(hasIngresos && hasCostos && datos.ingresos > 0 ? (datos.costos / datos.ingresos) * 100 : null)],
+      [
+        "(+) Ingresos operacionales",
+        fmtCOP(hasIngresos ? datos.ingresos : null),
+        hasIngresos ? "100%" : "N/D",
+      ],
+      [
+        "(-) Costo de ventas",
+        fmtCOP(hasCostos ? datos.costos : null),
+        fmtPct(
+          hasIngresos && hasCostos && datos.ingresos > 0
+            ? (datos.costos / datos.ingresos) * 100
+            : null,
+        ),
+      ],
       ["(=) Utilidad bruta", fmtCOP(utilidadBruta), fmtPct(mb)],
-      ["(-) Gastos operacionales", fmtCOP(hasGastos ? gastoOperativo : null), fmtPct(hasIngresos && hasGastos && datos.ingresos > 0 ? (gastoOperativo / datos.ingresos) * 100 : null)],
-      ...(datos.gastosAdmin ? [["    Gastos administrativos", fmtCOP(datos.gastosAdmin), "—"]] : []),
+      [
+        "(-) Gastos operacionales",
+        fmtCOP(hasGastos ? gastoOperativo : null),
+        fmtPct(
+          hasIngresos && hasGastos && datos.ingresos > 0
+            ? (gastoOperativo / datos.ingresos) * 100
+            : null,
+        ),
+      ],
+      ...(datos.gastosAdmin
+        ? [["    Gastos administrativos", fmtCOP(datos.gastosAdmin), "—"]]
+        : []),
       ...(datos.gastosVentas ? [["    Gastos de ventas", fmtCOP(datos.gastosVentas), "—"]] : []),
-      ...(datos.gastosFinancieros ? [["    Gastos financieros", fmtCOP(datos.gastosFinancieros), "—"]] : []),
-      ...(hasIncomeTax ? [["(-) Impuesto de renta reportado", fmtCOP(datos.impuestoRenta ?? 0), "—"]] : []),
-      ...(c.hasProfitBeforeTax ? [["(=) Utilidad antes de impuestos", fmtCOP(c.utilidadAntesImpuestos), "—"]] : []),
+      ...(datos.gastosFinancieros
+        ? [["    Gastos financieros", fmtCOP(datos.gastosFinancieros), "—"]]
+        : []),
+      ...(hasIncomeTax
+        ? [["(-) Impuesto de renta reportado", fmtCOP(datos.impuestoRenta ?? 0), "—"]]
+        : []),
+      ...(c.hasProfitBeforeTax
+        ? [["(=) Utilidad antes de impuestos", fmtCOP(c.utilidadAntesImpuestos), "—"]]
+        : []),
       ["(=) Utilidad neta", fmtCOP(utilidadNeta), fmtPct(mn)],
     ],
     columnStyles: { 1: { halign: "right", fontStyle: "bold" }, 2: { halign: "right" } },
@@ -1067,7 +1188,9 @@ export function generatePnLReport(args: {
 
   y = section(doc, y, "6", "Plan de accion");
   y = bullets(doc, y, [
-    mb != null && mb < 30 ? "Margen bruto bajo: renegocie costos o ajuste precios." : "Mantenga control de costos directos.",
+    mb != null && mb < 30
+      ? "Margen bruto bajo: renegocie costos o ajuste precios."
+      : "Mantenga control de costos directos.",
     mn == null
       ? "Margen neto no disponible; valide utilidad neta y sus componentes antes de compararlo."
       : mn < 8
@@ -1079,4 +1202,210 @@ export function generatePnLReport(args: {
 
   footer(doc);
   doc.save(`pnl-${Date.now()}.pdf`);
+}
+
+export function generateTransportTripReport(args: {
+  profile: ReportProfile;
+  trip: TransportTrip;
+  targetMarginPct: number;
+}) {
+  const { profile, trip, targetMarginPct } = args;
+  const metrics = computeTransportTripMetrics(trip, targetMarginPct);
+  const fmtMeasure = (value: number) =>
+    new Intl.NumberFormat("es-CO", { maximumFractionDigits: 1 }).format(value);
+  const doc = new jsPDF();
+  let y = header(
+    doc,
+    "Informe operativo y financiero de transporte",
+    `${trip.origin} → ${trip.destination} · viaje del ${trip.tripDate}`,
+    profile,
+    "CALCUTRANS",
+  );
+
+  y = section(doc, y, "1", "Resumen del viaje");
+  y = kpiGrid(doc, y, [
+    { label: "Flete + recargos", value: fmtCOP(metrics.contractRevenueCop) },
+    { label: "Costos directos registrados", value: fmtCOP(metrics.tripCostsCop) },
+    { label: "Utilidad operativa estimada", value: fmtCOP(metrics.operatingProfitCop) },
+    { label: "Margen operativo", value: fmtPct(metrics.operatingMarginPct) },
+    { label: "Flete base de equilibrio", value: fmtOptionalCompact(metrics.breakEvenFreightCop) },
+    {
+      label: `Flete para margen objetivo (${targetMarginPct}%)`,
+      value: fmtOptionalCompact(metrics.requiredFreightAtTargetCop),
+    },
+  ]);
+  y = diagnosis(
+    doc,
+    y,
+    metrics.tripCostsCop === 0
+      ? "No se registraron costos directos. La utilidad equivale al flete capturado y no representa la rentabilidad completa."
+      : metrics.operatingProfitCop < 0
+        ? `El viaje presenta una pérdida operativa estimada de ${fmtCOP(Math.abs(metrics.operatingProfitCop))}, antes de costos fijos e impuestos.`
+        : "Resultado positivo según los ingresos y costos directos registrados; no incluye costos fijos ni impuestos.",
+    metrics.tripCostsCop === 0 ? "warn" : metrics.operatingProfitCop < 0 ? "bad" : "ok",
+  );
+
+  y = section(doc, y, "2", "Datos operativos");
+  drawTable(doc, {
+    startY: y,
+    head: [["Dato", "Valor", "Dato", "Valor"]],
+    body: [
+      ["Fecha", trip.tripDate, "Ruta", `${trip.origin} → ${trip.destination}`],
+      ["Vehículo", trip.vehiclePlate || "N/D", "Conductor", trip.driverName || "N/D"],
+      [
+        "Kilómetros cargado",
+        `${fmtMeasure(trip.loadedKm)} km`,
+        "Kilómetros vacío",
+        `${fmtMeasure(trip.emptyKm)} km`,
+      ],
+      [
+        "Distancia total",
+        `${fmtMeasure(metrics.totalKm)} km`,
+        "Combustible",
+        `${fmtMeasure(trip.fuelLiters)} litros`,
+      ],
+      [
+        "Capacidad útil",
+        trip.capacityKg > 0 ? `${fmtMeasure(trip.capacityKg)} kg` : "N/D",
+        "Peso manifestado",
+        metrics.loadWeightKg > 0 ? `${fmtMeasure(metrics.loadWeightKg)} kg` : "N/D",
+      ],
+      [
+        "Uso de capacidad",
+        fmtPct(metrics.loadUtilizationPct),
+        "Avance de entrega",
+        fmtPct(metrics.deliveryProgressPct),
+      ],
+    ],
+    columnStyles: {
+      0: { cellWidth: 42, fontStyle: "bold" },
+      1: { cellWidth: 48 },
+      2: { cellWidth: 42, fontStyle: "bold" },
+      3: { cellWidth: 42 },
+    },
+  });
+  y = tableEnd(doc);
+
+  y = section(doc, y, "3", "Flete, recaudos y saldo del cliente");
+  drawTable(doc, {
+    startY: y,
+    head: [["Concepto", "Valor COP"]],
+    body: [
+      ["Flete pactado", fmtCOP(trip.freightCop)],
+      ["Recargos y servicios adicionales", fmtCOP(trip.surchargeCop)],
+      ["Total contractual", fmtCOP(metrics.contractRevenueCop)],
+      ["Anticipo recibido del cliente", fmtCOP(trip.customerAdvanceCop)],
+      ["Pago final recibido", fmtCOP(trip.customerFinalPaymentCop)],
+      ["Otros recaudos", fmtCOP(trip.otherCustomerCollectionCop)],
+      ["Retenciones certificadas", fmtCOP(metrics.customerWithheldCop)],
+      ["Saldo del cliente después de recaudos y retenciones", fmtCOP(metrics.customerBalanceCop)],
+    ],
+    columnStyles: { 1: { halign: "right", fontStyle: "bold", cellWidth: 50 } },
+  });
+  y = tableEnd(doc);
+
+  y = section(doc, y, "4", "Costos directos y arqueo");
+  drawTable(doc, {
+    startY: y,
+    head: [["Categoría", "Detalle / soporte", "Valor COP", "Sale de anticipo"]],
+    body:
+      trip.expenses.length === 0
+        ? [["Sin costos registrados", "—", fmtCOP(0), "—"]]
+        : trip.expenses.map((expense) => [
+            expense.category,
+            expense.note || "—",
+            fmtCOP(expense.amountCop),
+            expense.paidFromDriverCash ? "Sí" : "No",
+          ]),
+    columnStyles: {
+      0: { cellWidth: 43 },
+      1: { cellWidth: 64 },
+      2: { halign: "right", cellWidth: 34 },
+      3: { halign: "center", cellWidth: 29 },
+    },
+  });
+  y = tableEnd(doc);
+  drawTable(doc, {
+    startY: y,
+    head: [["Control de caja del conductor", "Valor COP"]],
+    body: [
+      ["Anticipo entregado", fmtCOP(trip.driverAdvanceCop)],
+      ["Gastos pagados con anticipo", fmtCOP(metrics.cashExpensesCop)],
+      ["Efectivo reintegrado", fmtCOP(trip.driverCashReturnedCop)],
+      [
+        "Diferencia por aclarar",
+        trip.driverAdvanceCop + metrics.cashExpensesCop + trip.driverCashReturnedCop === 0
+          ? "N/D · sin datos de caja"
+          : fmtCOP(metrics.driverCashDifferenceCop),
+      ],
+    ],
+    columnStyles: { 1: { halign: "right", fontStyle: "bold", cellWidth: 50 } },
+  });
+  y = tableEnd(doc);
+
+  y = section(doc, y, "5", "Manifiesto auxiliar");
+  drawTable(doc, {
+    startY: y,
+    head: [["Carga", "Remesa / referencia", "Bultos", "Peso kg", "Valor declarado", "Entrega"]],
+    body:
+      trip.cargoItems.length === 0
+        ? [["Sin carga detallada", "—", "N/D", "N/D", "N/D", "N/D"]]
+        : trip.cargoItems.map((item) => [
+            item.description || "—",
+            item.document || "—",
+            String(item.packages),
+            fmtMeasure(item.weightKg),
+            fmtCOP(item.declaredValueCop),
+            item.delivered ? "Entregada" : "Pendiente",
+          ]),
+    columnStyles: {
+      0: { cellWidth: 38 },
+      1: { cellWidth: 35 },
+      2: { halign: "right", cellWidth: 18 },
+      3: { halign: "right", cellWidth: 21 },
+      4: { halign: "right", cellWidth: 34 },
+      5: { halign: "center", cellWidth: 24 },
+    },
+  });
+  y = tableEnd(doc);
+
+  y = section(doc, y, "6", "Indicadores de eficiencia");
+  drawTable(doc, {
+    startY: y,
+    head: [["Indicador", "Resultado"]],
+    body: [
+      ["Costo por kilómetro total", fmtOptionalCompact(metrics.costPerKmCop)],
+      [
+        "Flete por tonelada-kilómetro cargada",
+        fmtOptionalCompact(metrics.revenuePerLoadedTonKmCop),
+      ],
+      [
+        "Rendimiento de combustible",
+        metrics.fuelEfficiencyKmPerLiter === null
+          ? "N/D"
+          : `${metrics.fuelEfficiencyKmPerLiter.toFixed(2)} km/l`,
+      ],
+      ["Gasto en combustible", fmtCOP(metrics.fuelExpenseCop)],
+      ["Costo por litro", fmtOptionalCompact(metrics.fuelCostPerLiterCop)],
+    ],
+    columnStyles: { 1: { halign: "right", fontStyle: "bold", cellWidth: 60 } },
+  });
+  y = tableEnd(doc);
+  y = paragraph(
+    doc,
+    y,
+    "Alcance: informe gerencial en COP calculado únicamente con los datos ingresados. No liquida impuestos, retenciones, costos financieros, depreciación ni costos fijos. El manifiesto es auxiliar y no reemplaza los documentos legales de transporte. La retención se refleja solo cuando se registra según certificado recibido.",
+  );
+
+  footer(doc);
+  const safePart = (value: string) =>
+    value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9-]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 24) || "viaje";
+  doc.save(
+    `calcutrans-${trip.tripDate}-${safePart(trip.origin)}-${safePart(trip.destination)}.pdf`,
+  );
 }

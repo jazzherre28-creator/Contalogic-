@@ -17,6 +17,7 @@ import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AppAdminRouteImport } from './routes/_app.admin'
 import { Route as AppCalculatorRouteImport } from './routes/_app.calculator'
+import { Route as AppCalcutransRouteImport } from './routes/_app.calcutrans'
 import { Route as AppCalendarRouteImport } from './routes/_app.calendar'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppDictionaryRouteImport } from './routes/_app.dictionary'
@@ -64,6 +65,11 @@ const AppCalculatorRoute = AppCalculatorRouteImport.update({
   path: '/calculator',
   getParentRoute: () => AppRoute,
 } as any)
+const AppCalcutransRoute = AppCalcutransRouteImport.update({
+  id: '/calcutrans',
+  path: '/calcutrans',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppCalendarRoute = AppCalendarRouteImport.update({
   id: '/calendar',
   path: '/calendar',
@@ -108,6 +114,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof AppAdminRoute
   '/calculator': typeof AppCalculatorRoute
+  '/calcutrans': typeof AppCalcutransRoute
   '/calendar': typeof AppCalendarRoute
   '/dashboard': typeof AppDashboardRoute
   '/dictionary': typeof AppDictionaryRoute
@@ -124,6 +131,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/admin': typeof AppAdminRoute
   '/calculator': typeof AppCalculatorRoute
+  '/calcutrans': typeof AppCalcutransRoute
   '/calendar': typeof AppCalendarRoute
   '/dashboard': typeof AppDashboardRoute
   '/dictionary': typeof AppDictionaryRoute
@@ -142,6 +150,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/_app/admin': typeof AppAdminRoute
   '/_app/calculator': typeof AppCalculatorRoute
+  '/_app/calcutrans': typeof AppCalcutransRoute
   '/_app/calendar': typeof AppCalendarRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/dictionary': typeof AppDictionaryRoute
@@ -160,6 +169,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/admin'
     | '/calculator'
+    | '/calcutrans'
     | '/calendar'
     | '/dashboard'
     | '/dictionary'
@@ -176,6 +186,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/admin'
     | '/calculator'
+    | '/calcutrans'
     | '/calendar'
     | '/dashboard'
     | '/dictionary'
@@ -193,6 +204,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/_app/admin'
     | '/_app/calculator'
+    | '/_app/calcutrans'
     | '/_app/calendar'
     | '/_app/dashboard'
     | '/_app/dictionary'
@@ -269,6 +281,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCalculatorRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/calcutrans': {
+      id: '/_app/calcutrans'
+      path: '/calcutrans'
+      fullPath: '/calcutrans'
+      preLoaderRoute: typeof AppCalcutransRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/calendar': {
       id: '/_app/calendar'
       path: '/calendar'
@@ -324,6 +343,7 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
   AppCalculatorRoute: typeof AppCalculatorRoute
+  AppCalcutransRoute: typeof AppCalcutransRoute
   AppCalendarRoute: typeof AppCalendarRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppDictionaryRoute: typeof AppDictionaryRoute
@@ -336,6 +356,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
   AppCalculatorRoute: AppCalculatorRoute,
+  AppCalcutransRoute: AppCalcutransRoute,
   AppCalendarRoute: AppCalendarRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppDictionaryRoute: AppDictionaryRoute,

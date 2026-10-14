@@ -256,7 +256,7 @@ export type Database = {
       }
       transport_trips: {
         Row: {
-          capacity_kg: number
+          capacity_kg: number | null
           cargo_items: Json
           created_at: string
           customer_advance_cop: number
@@ -277,10 +277,10 @@ export type Database = {
           surcharge_cop: number
           trip_date: string
           user_id: string
-          vehicle_plate: string
+          vehicle_plate: string | null
         }
         Insert: {
-          capacity_kg: number
+          capacity_kg: number | null
           cargo_items?: Json
           created_at?: string
           customer_advance_cop?: number
@@ -301,10 +301,10 @@ export type Database = {
           surcharge_cop?: number
           trip_date?: string
           user_id: string
-          vehicle_plate: string
+          vehicle_plate: string | null
         }
         Update: {
-          capacity_kg?: number
+          capacity_kg?: number | null
           cargo_items?: Json
           created_at?: string
           customer_advance_cop?: number
@@ -325,7 +325,7 @@ export type Database = {
           surcharge_cop?: number
           trip_date?: string
           user_id?: string
-          vehicle_plate?: string
+          vehicle_plate?: string | null
         }
         Relationships: []
       }

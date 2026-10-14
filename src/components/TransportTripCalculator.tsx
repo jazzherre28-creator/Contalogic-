@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Check,
   ClipboardList,
+  FileDown,
   Fuel,
   Gauge,
   Pencil,
@@ -37,6 +38,7 @@ import {
   type TransportTrip,
 } from "@/lib/transport-analytics";
 import { toast } from "sonner";
+import { generateTransportTripReport, type ReportProfile } from "@/lib/pdf-report";
 
 const EXPENSE_CATEGORIES = [
   "ACPM / combustible",
@@ -197,6 +199,7 @@ function NumberField({
   suffix,
   min = 0,
   step = "any",
+  required = false,
 }: {
   label: string;
   value: number;
@@ -204,6 +207,7 @@ function NumberField({
   suffix?: string;
   min?: number;
   step?: string;
+  required?: boolean;
 }) {
   return (
     <label className="block space-y-1">
@@ -213,6 +217,7 @@ function NumberField({
           type="number"
           min={min}
           step={step}
+          required={required}
           value={value}
           onChange={(event) => onChange(event.target.value === "" ? 0 : Number(event.target.value))}
           className="input-neon w-full pr-14"
@@ -232,11 +237,13 @@ function TextField({
   value,
   onChange,
   placeholder,
+  required = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  required?: boolean;
 }) {
   return (
     <label className="block space-y-1">
@@ -244,6 +251,7 @@ function TextField({
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        required={required}
         placeholder={placeholder}
         className="input-neon w-full"
       />
@@ -265,7 +273,9 @@ function Metric({
   return (
     <div className="rounded-lg border border-white/10 bg-black/20 p-3">
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className={`mt-1 font-mono text-lg font-semibold ${emphasis ? "text-neon" : "text-foreground"}`}>
+      <div
+        className={`mt-1 font-mono text-lg font-semibold ${emphasis ? "text-neon" : "text-foreground"}`}
+      >
         {value}
       </div>
       {detail && <div className="mt-1 text-[10px] text-muted-foreground">{detail}</div>}
@@ -273,7 +283,13 @@ function Metric({
   );
 }
 
-export function TransportTripCalculator({ userId }: { userId: string }) {
+export function TransportTripCalculator({
+  userId,
+  profile,
+}: {
+  userId: string;
+  profile: ReportProfile;
+}) {
   const [trip, setTrip] = useState<TransportTrip>(blankTrip);
   const [targetMarginPct, setTargetMarginPct] = useState(10);
   const [trips, setTrips] = useState<TransportTrip[]>([]);
@@ -285,8 +301,7 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
     () => computeTransportTripMetrics(trip, targetMarginPct),
     [trip, targetMarginPct],
   );
-  const cargoOverCapacity =
-    metrics.loadUtilizationPct !== null && metrics.loadUtilizationPct > 100;
+  const cargoOverCapacity = metrics.loadUtilizationPct !== null && metrics.loadUtilizationPct > 100;
   const expenseChart = metrics.expenseBreakdown.filter((item) => item.amountCop > 0);
 
   const loadTrips = useCallback(async () => {
@@ -308,11 +323,11 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
           tripDate: row.trip_date,
           origin: row.origin,
           destination: row.destination,
-          vehiclePlate: row.vehicle_plate,
+          vehiclePlate: row.vehicle_plate ?? "",
           driverName: row.driver_name ?? "",
           loadedKm: Number(row.loaded_km),
           emptyKm: Number(row.empty_km),
-          capacityKg: Number(row.capacity_kg),
+          capacityKg: Number(row.capacity_kg ?? 0),
           fuelLiters: Number(row.fuel_liters),
           cargoItems: parseCargoItems(row.cargo_items),
           freightCop: Number(row.freight_cop),
@@ -330,7 +345,8 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
       }
       setTrips(rows);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo cargar el historial de viajes.";
+      const message =
+        error instanceof Error ? error.message : "No se pudo cargar el historial de viajes.";
       setLoadError(message);
       toast.error(message);
     } finally {
@@ -382,13 +398,20 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
         trip_date: trip.tripDate,
         origin: trip.origin.trim(),
         destination: trip.destination.trim(),
-        vehicle_plate: trip.vehiclePlate.trim().toUpperCase(),
+        vehicle_plate: trip.vehiclePlate.trim() ? trip.vehiclePlate.trim().toUpperCase() : null,
         driver_name: trip.driverName.trim() || null,
         loaded_km: trip.loadedKm,
         empty_km: trip.emptyKm,
-        capacity_kg: trip.capacityKg,
+        capacity_kg: trip.capacityKg > 0 ? trip.capacityKg : null,
         fuel_liters: trip.fuelLiters,
-        cargo_items: trip.cargoItems,
+        cargo_items: trip.cargoItems.filter(
+          (item) =>
+            item.description.trim() ||
+            item.document.trim() ||
+            item.packages > 0 ||
+            item.weightKg > 0 ||
+            item.declaredValueCop > 0,
+        ),
         freight_cop: trip.freightCop,
         surcharge_cop: trip.surchargeCop,
         customer_advance_cop: trip.customerAdvanceCop,
@@ -414,8 +437,15 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
             .maybeSingle();
       const { data, error } = result;
       if (error) throw error;
-      if (!data) throw new Error("El viaje no se guardó; verifica que el perfil siga en el sector Transporte.");
-      toast.success(trip.id ? "Viaje actualizado." : "Viaje guardado en el control independiente de transporte.");
+      if (!data)
+        throw new Error(
+          "El viaje no se guardó; verifica que el perfil siga en el sector Transporte.",
+        );
+      toast.success(
+        trip.id
+          ? "Viaje actualizado."
+          : "Viaje guardado en el control independiente de transporte.",
+      );
       setTrip(blankTrip());
       await loadTrips();
     } catch (error) {
@@ -426,7 +456,11 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
   };
 
   const deleteTrip = async (tripId: string) => {
-    if (!window.confirm("¿Eliminar este viaje y su manifiesto de carga? Esta acción no se puede deshacer.")) {
+    if (
+      !window.confirm(
+        "¿Eliminar este viaje y su manifiesto de carga? Esta acción no se puede deshacer.",
+      )
+    ) {
       return;
     }
     try {
@@ -440,6 +474,22 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
       await loadTrips();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo eliminar el viaje.");
+    }
+  };
+
+  const exportTripPdf = (tripToExport: TransportTrip, validate = true) => {
+    if (validate) {
+      const validationError = validateTransportTrip(tripToExport);
+      if (validationError) {
+        toast.error(validationError);
+        return;
+      }
+    }
+    try {
+      generateTransportTripReport({ profile, trip: tripToExport, targetMarginPct });
+      toast.success("Reporte PDF de CalcuTrans generado.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo generar el reporte PDF.");
     }
   };
 
@@ -470,8 +520,8 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
           <div>
             <h2 className="text-base font-semibold">Control operativo y financiero de carga</h2>
             <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-              Módulo exclusivo de Transporte. Los viajes y manifiestos se guardan en una tabla propia;
-              no se mezclan con movimientos manuales, análisis OCR ni otros sectores.
+              Módulo exclusivo de Transporte. Los viajes y manifiestos se guardan en una tabla
+              propia; no se mezclan con movimientos manuales, análisis OCR ni otros sectores.
             </p>
           </div>
         </div>
@@ -486,16 +536,29 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
       </header>
 
       <div className="rounded-md border border-amber-400/20 bg-amber-400/[0.04] px-3 py-2 text-[11px] leading-relaxed text-amber-100/80">
-        Análisis gerencial en COP: no liquida ni estima IVA, retenciones, ICA, renta, costos financieros,
-        depreciación o costos fijos. Registra retenciones solo según certificados recibidos e incluye los
-        costos que ingreses. El manifiesto es auxiliar y no reemplaza remesa, manifiesto ni documentos exigidos.
+        Análisis gerencial en COP: no liquida ni estima IVA, retenciones, ICA, renta, costos
+        financieros, depreciación o costos fijos. Registra retenciones solo según certificados
+        recibidos e incluye los costos que ingreses. El manifiesto es auxiliar y no reemplaza
+        remesa, manifiesto ni documentos exigidos.
       </div>
+      {metrics.tripCostsCop === 0 && (
+        <p className="rounded-md border border-sky-400/20 bg-sky-400/[0.04] px-3 py-2 text-[11px] leading-relaxed text-sky-100/80">
+          Aún no registras costos: la utilidad mostrada equivale al flete ingresado y no representa
+          la rentabilidad completa del viaje.
+        </p>
+      )}
 
       <form onSubmit={saveTrip} className="space-y-5">
-        <section className="space-y-3">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-neon">
-            <Route className="h-4 w-4" /> Datos del viaje y vehículo
-          </h3>
+        <section className="space-y-3 rounded-lg border border-neon/20 bg-neon/[0.03] p-4">
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-neon">
+              <Route className="h-4 w-4" /> 1. Resumen del viaje
+            </h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Para empezar solo necesitas fecha, ruta y valor del flete. Los demás datos son
+              opcionales.
+            </p>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="block space-y-1">
               <span className="text-[11px] font-medium text-slate-300">Fecha del viaje</span>
@@ -507,173 +570,356 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
                 required
               />
             </label>
-            <TextField label="Origen" value={trip.origin} onChange={(value) => changeTrip("origin", value)} placeholder="Ciudad / departamento" />
-            <TextField label="Destino" value={trip.destination} onChange={(value) => changeTrip("destination", value)} placeholder="Ciudad / departamento" />
-            <TextField label="Placa" value={trip.vehiclePlate} onChange={(value) => changeTrip("vehiclePlate", value)} placeholder="ABC123" />
-            <TextField label="Conductor (opcional)" value={trip.driverName} onChange={(value) => changeTrip("driverName", value)} />
-            <NumberField label="Capacidad útil del vehículo" value={trip.capacityKg} onChange={(value) => changeTrip("capacityKg", value)} suffix="kg" />
-            <NumberField label="Kilómetros cargado" value={trip.loadedKm} onChange={(value) => changeTrip("loadedKm", value)} suffix="km" />
-            <NumberField label="Kilómetros vacío" value={trip.emptyKm} onChange={(value) => changeTrip("emptyKm", value)} suffix="km" />
-            <NumberField label="Combustible consumido" value={trip.fuelLiters} onChange={(value) => changeTrip("fuelLiters", value)} suffix="litros" />
+            <TextField
+              label="Origen"
+              value={trip.origin}
+              onChange={(value) => changeTrip("origin", value)}
+              placeholder="Ciudad / departamento"
+              required
+            />
+            <TextField
+              label="Destino"
+              value={trip.destination}
+              onChange={(value) => changeTrip("destination", value)}
+              placeholder="Ciudad / departamento"
+              required
+            />
+            <NumberField
+              label="Flete pactado"
+              value={trip.freightCop}
+              onChange={(value) => changeTrip("freightCop", value)}
+              suffix="COP"
+              step="1"
+              min={1}
+              required
+            />
           </div>
+          <details className="rounded-md border border-white/10 bg-black/10 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-slate-200">
+              Datos del vehículo y recorrido (opcionales)
+            </summary>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <TextField
+                label="Placa"
+                value={trip.vehiclePlate}
+                onChange={(value) => changeTrip("vehiclePlate", value)}
+                placeholder="ABC123"
+              />
+              <TextField
+                label="Conductor (opcional)"
+                value={trip.driverName}
+                onChange={(value) => changeTrip("driverName", value)}
+              />
+              <NumberField
+                label="Capacidad útil del vehículo"
+                value={trip.capacityKg}
+                onChange={(value) => changeTrip("capacityKg", value)}
+                suffix="kg"
+              />
+              <NumberField
+                label="Kilómetros cargado"
+                value={trip.loadedKm}
+                onChange={(value) => changeTrip("loadedKm", value)}
+                suffix="km"
+              />
+              <NumberField
+                label="Kilómetros vacío"
+                value={trip.emptyKm}
+                onChange={(value) => changeTrip("emptyKm", value)}
+                suffix="km"
+              />
+              <NumberField
+                label="Combustible consumido"
+                value={trip.fuelLiters}
+                onChange={(value) => changeTrip("fuelLiters", value)}
+                suffix="litros"
+              />
+            </div>
+          </details>
         </section>
 
-        <section className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-neon">
-                <ClipboardList className="h-4 w-4" /> Manifiesto auxiliar y entrega
-              </h3>
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                El valor declarado es informativo: no se suma al flete ni a los ingresos.
+        <details className="rounded-lg border border-white/10 bg-black/10 p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-neon">
+            2. Manifiesto auxiliar y control de entrega (opcional)
+          </summary>
+          <section className="mt-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-neon">
+                  <ClipboardList className="h-4 w-4" /> Manifiesto auxiliar y entrega
+                </h3>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  El valor declarado es informativo: no se suma al flete ni a los ingresos.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => changeTrip("cargoItems", [...trip.cargoItems, newCargoItem()])}
+                className="inline-flex items-center gap-1 rounded-md border border-neon/30 px-2.5 py-1.5 text-xs text-neon hover:bg-neon/10"
+              >
+                <Plus className="h-3 w-3" /> Añadir carga
+              </button>
+            </div>
+            {trip.cargoItems.length === 0 ? (
+              <p className="rounded-md border border-dashed border-white/15 p-3 text-xs text-muted-foreground">
+                Agrega al menos una línea para controlar documentos, bultos, peso y entrega.
               </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => changeTrip("cargoItems", [...trip.cargoItems, newCargoItem()])}
-              className="inline-flex items-center gap-1 rounded-md border border-neon/30 px-2.5 py-1.5 text-xs text-neon hover:bg-neon/10"
-            >
-              <Plus className="h-3 w-3" /> Añadir carga
-            </button>
-          </div>
-          {trip.cargoItems.length === 0 ? (
-            <p className="rounded-md border border-dashed border-white/15 p-3 text-xs text-muted-foreground">
-              Agrega al menos una línea para controlar documentos, bultos, peso y entrega.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {trip.cargoItems.map((item, index) => (
-                <div key={item.id} className="grid gap-2 rounded-md border border-white/10 bg-black/15 p-3 sm:grid-cols-2 lg:grid-cols-[1.3fr_1fr_0.7fr_0.8fr_1fr_auto_auto] lg:items-end">
-                  <TextField
-                    label={`Carga ${index + 1}`}
-                    value={item.description}
-                    onChange={(value) => changeCargo(item.id, "description", value)}
-                    placeholder="Descripción"
-                  />
-                  <TextField
-                    label="Remesa / referencia"
-                    value={item.document}
-                    onChange={(value) => changeCargo(item.id, "document", value)}
-                  />
-                  <NumberField label="Bultos" value={item.packages} onChange={(value) => changeCargo(item.id, "packages", value)} suffix="und." step="1" />
-                  <NumberField label="Peso" value={item.weightKg} onChange={(value) => changeCargo(item.id, "weightKg", value)} suffix="kg" />
-                  <NumberField label="Valor declarado" value={item.declaredValueCop} onChange={(value) => changeCargo(item.id, "declaredValueCop", value)} suffix="COP" step="1" />
-                  <button
-                    type="button"
-                    onClick={() => changeCargo(item.id, "delivered", !item.delivered)}
-                    className={`inline-flex h-10 items-center justify-center gap-1 rounded-md border px-2 text-[10px] ${item.delivered ? "border-emerald-400/40 text-emerald-300" : "border-white/15 text-slate-300"}`}
+            ) : (
+              <div className="space-y-2">
+                {trip.cargoItems.map((item, index) => (
+                  <div
+                    key={item.id}
+                    className="grid gap-2 rounded-md border border-white/10 bg-black/15 p-3 sm:grid-cols-2 lg:grid-cols-[1.3fr_1fr_0.7fr_0.8fr_1fr_auto_auto] lg:items-end"
                   >
-                    <Check className="h-3 w-3" /> {item.delivered ? "Entregado" : "Pendiente"}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Quitar carga ${index + 1}`}
-                    onClick={() => changeTrip("cargoItems", trip.cargoItems.filter((cargo) => cargo.id !== item.id))}
-                    className="h-10 rounded-md border border-rose-500/20 px-2 text-rose-300 hover:bg-rose-500/10"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          {cargoOverCapacity && (
-            <p className="flex items-center gap-2 text-xs text-rose-300">
-              <AlertTriangle className="h-4 w-4 shrink-0" /> El peso registrado excede la capacidad útil informada.
-              Verifica los datos y el límite autorizado del vehículo.
-            </p>
-          )}
-        </section>
+                    <TextField
+                      label={`Carga ${index + 1}`}
+                      value={item.description}
+                      onChange={(value) => changeCargo(item.id, "description", value)}
+                      placeholder="Descripción"
+                    />
+                    <TextField
+                      label="Remesa / referencia"
+                      value={item.document}
+                      onChange={(value) => changeCargo(item.id, "document", value)}
+                    />
+                    <NumberField
+                      label="Bultos"
+                      value={item.packages}
+                      onChange={(value) => changeCargo(item.id, "packages", value)}
+                      suffix="und."
+                      step="1"
+                    />
+                    <NumberField
+                      label="Peso"
+                      value={item.weightKg}
+                      onChange={(value) => changeCargo(item.id, "weightKg", value)}
+                      suffix="kg"
+                    />
+                    <NumberField
+                      label="Valor declarado"
+                      value={item.declaredValueCop}
+                      onChange={(value) => changeCargo(item.id, "declaredValueCop", value)}
+                      suffix="COP"
+                      step="1"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => changeCargo(item.id, "delivered", !item.delivered)}
+                      className={`inline-flex h-10 items-center justify-center gap-1 rounded-md border px-2 text-[10px] ${item.delivered ? "border-emerald-400/40 text-emerald-300" : "border-white/15 text-slate-300"}`}
+                    >
+                      <Check className="h-3 w-3" /> {item.delivered ? "Entregado" : "Pendiente"}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Quitar carga ${index + 1}`}
+                      onClick={() =>
+                        changeTrip(
+                          "cargoItems",
+                          trip.cargoItems.filter((cargo) => cargo.id !== item.id),
+                        )
+                      }
+                      className="h-10 rounded-md border border-rose-500/20 px-2 text-rose-300 hover:bg-rose-500/10"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {cargoOverCapacity && (
+              <p className="flex items-center gap-2 text-xs text-rose-300">
+                <AlertTriangle className="h-4 w-4 shrink-0" /> El peso registrado excede la
+                capacidad útil informada. Verifica los datos y el límite autorizado del vehículo.
+              </p>
+            )}
+          </section>
+        </details>
 
-        <section className="space-y-3">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-neon">
-            <Receipt className="h-4 w-4" /> Flete, recaudos y anticipos
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <NumberField label="Flete pactado" value={trip.freightCop} onChange={(value) => changeTrip("freightCop", value)} suffix="COP" step="1" />
-            <NumberField label="Recargos / servicios adicionales" value={trip.surchargeCop} onChange={(value) => changeTrip("surchargeCop", value)} suffix="COP" step="1" />
-            <NumberField label="Anticipo del cliente" value={trip.customerAdvanceCop} onChange={(value) => changeTrip("customerAdvanceCop", value)} suffix="COP" step="1" />
-            <NumberField label="Pago final del cliente" value={trip.customerFinalPaymentCop} onChange={(value) => changeTrip("customerFinalPaymentCop", value)} suffix="COP" step="1" />
-            <NumberField label="Otros recaudos del cliente" value={trip.otherCustomerCollectionCop} onChange={(value) => changeTrip("otherCustomerCollectionCop", value)} suffix="COP" step="1" />
-            <NumberField label="Retenciones certificadas" value={trip.customerWithheldCop} onChange={(value) => changeTrip("customerWithheldCop", value)} suffix="COP" step="1" />
-            <NumberField label="Anticipo de caja al conductor" value={trip.driverAdvanceCop} onChange={(value) => changeTrip("driverAdvanceCop", value)} suffix="COP" step="1" />
-            <NumberField label="Efectivo reintegrado por conductor" value={trip.driverCashReturnedCop} onChange={(value) => changeTrip("driverCashReturnedCop", value)} suffix="COP" step="1" />
+        <section className="space-y-3 rounded-lg border border-white/10 bg-black/10 p-4">
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-neon">
+              <Receipt className="h-4 w-4" /> 3. Flete y recaudos
+            </h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              El flete basta para estimar ingresos. Registra recaudos solo cuando necesites
+              controlar el saldo del cliente.
+            </p>
           </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <NumberField
+              label="Recargos / servicios adicionales"
+              value={trip.surchargeCop}
+              onChange={(value) => changeTrip("surchargeCop", value)}
+              suffix="COP"
+              step="1"
+            />
+          </div>
+          <details className="rounded-md border border-white/10 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-slate-200">
+              Anticipos, pagos y retenciones certificadas
+            </summary>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <NumberField
+                label="Anticipo del cliente"
+                value={trip.customerAdvanceCop}
+                onChange={(value) => changeTrip("customerAdvanceCop", value)}
+                suffix="COP"
+                step="1"
+              />
+              <NumberField
+                label="Pago final del cliente"
+                value={trip.customerFinalPaymentCop}
+                onChange={(value) => changeTrip("customerFinalPaymentCop", value)}
+                suffix="COP"
+                step="1"
+              />
+              <NumberField
+                label="Otros recaudos del cliente"
+                value={trip.otherCustomerCollectionCop}
+                onChange={(value) => changeTrip("otherCustomerCollectionCop", value)}
+                suffix="COP"
+                step="1"
+              />
+              <NumberField
+                label="Retenciones certificadas"
+                value={trip.customerWithheldCop}
+                onChange={(value) => changeTrip("customerWithheldCop", value)}
+                suffix="COP"
+                step="1"
+              />
+            </div>
+          </details>
+          <details className="rounded-md border border-white/10 p-3">
+            <summary className="cursor-pointer text-xs font-medium text-slate-200">
+              Anticipo y reintegro de caja del conductor
+            </summary>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <NumberField
+                label="Anticipo de caja al conductor"
+                value={trip.driverAdvanceCop}
+                onChange={(value) => changeTrip("driverAdvanceCop", value)}
+                suffix="COP"
+                step="1"
+              />
+              <NumberField
+                label="Efectivo reintegrado por conductor"
+                value={trip.driverCashReturnedCop}
+                onChange={(value) => changeTrip("driverCashReturnedCop", value)}
+                suffix="COP"
+                step="1"
+              />
+            </div>
+          </details>
           <p className="text-[10px] text-muted-foreground">
-            El anticipo del cliente hace parte del recaudo del flete, no es un ingreso adicional.
-            El anticipo al conductor es caja entregada, no un gasto; los gastos se registran por separado.
+            El anticipo del cliente hace parte del recaudo del flete, no es un ingreso adicional. El
+            anticipo al conductor es caja entregada, no un gasto; los gastos se registran por
+            separado.
           </p>
         </section>
 
-        <section className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-neon">
-                <Fuel className="h-4 w-4" /> Costos y arqueo de caja
-              </h3>
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                Todo gasto afecta la rentabilidad; solo los marcados como pagados con anticipo de caja afectan el arqueo del conductor.
+        <details className="rounded-lg border border-white/10 bg-black/10 p-4">
+          <summary className="cursor-pointer text-sm font-semibold text-neon">
+            4. Costos del viaje y arqueo de caja (opcionales)
+          </summary>
+          <section className="mt-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-neon">
+                  <Fuel className="h-4 w-4" /> Costos y arqueo de caja
+                </h3>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Todo gasto afecta la rentabilidad; solo los marcados como pagados con anticipo de
+                  caja afectan el arqueo del conductor.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => changeTrip("expenses", [...trip.expenses, newExpense()])}
+                className="inline-flex items-center gap-1 rounded-md border border-neon/30 px-2.5 py-1.5 text-xs text-neon hover:bg-neon/10"
+              >
+                <Plus className="h-3 w-3" /> Añadir gasto
+              </button>
+            </div>
+            {trip.expenses.length === 0 ? (
+              <p className="rounded-md border border-dashed border-white/15 p-3 text-xs text-muted-foreground">
+                Registra combustible, peajes y demás costos asociados a este viaje.
               </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => changeTrip("expenses", [...trip.expenses, newExpense()])}
-              className="inline-flex items-center gap-1 rounded-md border border-neon/30 px-2.5 py-1.5 text-xs text-neon hover:bg-neon/10"
-            >
-              <Plus className="h-3 w-3" /> Añadir gasto
-            </button>
-          </div>
-          {trip.expenses.length === 0 ? (
-            <p className="rounded-md border border-dashed border-white/15 p-3 text-xs text-muted-foreground">
-              Registra combustible, peajes y demás costos asociados a este viaje.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {trip.expenses.map((expense) => (
-                <div key={expense.id} className="grid gap-2 rounded-md border border-white/10 bg-black/15 p-3 sm:grid-cols-2 lg:grid-cols-[1.1fr_0.8fr_1.2fr_1fr_auto_auto] lg:items-end">
-                  <label className="block space-y-1">
-                    <span className="text-[11px] font-medium text-slate-300">Categoría del costo</span>
-                    <select
-                      value={expense.category}
-                      onChange={(event) => changeExpense(expense.id, "category", event.target.value)}
-                      className="input-neon w-full"
-                    >
-                      {EXPENSE_CATEGORIES.map((category) => <option key={category}>{category}</option>)}
-                    </select>
-                  </label>
-                  <NumberField label="Valor" value={expense.amountCop} onChange={(value) => changeExpense(expense.id, "amountCop", value)} suffix="COP" step="1" />
-                  <TextField label="Soporte / detalle" value={expense.note} onChange={(value) => changeExpense(expense.id, "note", value)} placeholder="Recibo, observación" />
-                  <label className="flex h-10 items-center gap-2 rounded-md border border-white/10 px-2 text-[10px] text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={expense.paidFromDriverCash}
-                      onChange={(event) => changeExpense(expense.id, "paidFromDriverCash", event.target.checked)}
-                    />
-                    Sale del anticipo
-                  </label>
-                  <span />
-                  <button
-                    type="button"
-                    aria-label="Quitar gasto"
-                    onClick={() => changeTrip("expenses", trip.expenses.filter((item) => item.id !== expense.id))}
-                    className="h-10 rounded-md border border-rose-500/20 px-2 text-rose-300 hover:bg-rose-500/10"
+            ) : (
+              <div className="space-y-2">
+                {trip.expenses.map((expense) => (
+                  <div
+                    key={expense.id}
+                    className="grid gap-2 rounded-md border border-white/10 bg-black/15 p-3 sm:grid-cols-2 lg:grid-cols-[1.1fr_0.8fr_1.2fr_1fr_auto_auto] lg:items-end"
                   >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+                    <label className="block space-y-1">
+                      <span className="text-[11px] font-medium text-slate-300">
+                        Categoría del costo
+                      </span>
+                      <select
+                        value={expense.category}
+                        onChange={(event) =>
+                          changeExpense(expense.id, "category", event.target.value)
+                        }
+                        className="input-neon w-full"
+                      >
+                        {EXPENSE_CATEGORIES.map((category) => (
+                          <option key={category}>{category}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <NumberField
+                      label="Valor"
+                      value={expense.amountCop}
+                      onChange={(value) => changeExpense(expense.id, "amountCop", value)}
+                      suffix="COP"
+                      step="1"
+                    />
+                    <TextField
+                      label="Soporte / detalle"
+                      value={expense.note}
+                      onChange={(value) => changeExpense(expense.id, "note", value)}
+                      placeholder="Recibo, observación"
+                    />
+                    <label className="flex h-10 items-center gap-2 rounded-md border border-white/10 px-2 text-[10px] text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={expense.paidFromDriverCash}
+                        onChange={(event) =>
+                          changeExpense(expense.id, "paidFromDriverCash", event.target.checked)
+                        }
+                      />
+                      Sale del anticipo
+                    </label>
+                    <span />
+                    <button
+                      type="button"
+                      aria-label="Quitar gasto"
+                      onClick={() =>
+                        changeTrip(
+                          "expenses",
+                          trip.expenses.filter((item) => item.id !== expense.id),
+                        )
+                      }
+                      className="h-10 rounded-md border border-rose-500/20 px-2 text-rose-300 hover:bg-rose-500/10"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </details>
 
         <section className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 className="flex items-center gap-2 text-sm font-semibold text-neon">
-                <Gauge className="h-4 w-4" /> Indicadores en tiempo real
+                <Gauge className="h-4 w-4" /> 5. Resultado del viaje
               </h3>
               <p className="mt-1 text-[10px] text-muted-foreground">
-                Rentabilidad operativa antes de costos fijos e impuestos, según los valores capturados.
+                Rentabilidad operativa antes de costos fijos e impuestos, según los valores
+                capturados.
               </p>
             </div>
             <NumberField
@@ -686,16 +932,31 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
             />
           </div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <Metric label="Flete + recargos pactados" value={formatCOP(metrics.contractRevenueCop)} />
+            <Metric
+              label="Flete + recargos pactados"
+              value={formatCOP(metrics.contractRevenueCop)}
+            />
             <Metric label="Costos directos del viaje" value={formatCOP(metrics.tripCostsCop)} />
             <Metric
               label="Utilidad operativa estimada"
               value={formatCOP(metrics.operatingProfitCop)}
-              detail={metrics.operatingMarginPct === null ? "Margen: N/D" : `Margen: ${formatNumber(metrics.operatingMarginPct)}%`}
+              detail={
+                metrics.operatingMarginPct === null
+                  ? "Margen: N/D"
+                  : `Margen: ${formatNumber(metrics.operatingMarginPct)}%`
+              }
               emphasis
             />
-            <Metric label="Flete base de equilibrio" value={formatCOP(metrics.breakEvenFreightCop)} detail="Recargos restados de los costos directos del viaje" />
-            <Metric label="Flete base para margen objetivo" value={formatCOP(metrics.requiredFreightAtTargetCop)} detail={`Objetivo: ${formatNumber(targetMarginPct)}% · incluye recargos registrados, antes de costos fijos e impuestos`} />
+            <Metric
+              label="Flete base de equilibrio"
+              value={formatCOP(metrics.breakEvenFreightCop)}
+              detail="Recargos restados de los costos directos del viaje"
+            />
+            <Metric
+              label="Flete base para margen objetivo"
+              value={formatCOP(metrics.requiredFreightAtTargetCop)}
+              detail={`Objetivo: ${formatNumber(targetMarginPct)}% · incluye recargos registrados, antes de costos fijos e impuestos`}
+            />
             <Metric
               label="Recaudo cliente"
               value={formatCOP(metrics.customerCollectedCop)}
@@ -703,38 +964,91 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
             />
             <Metric
               label="Uso de capacidad por peso"
-              value={metrics.loadUtilizationPct === null ? "N/D" : `${formatNumber(metrics.loadUtilizationPct)}%`}
-              detail={`${formatNumber(metrics.loadWeightKg, 0)} kg de ${formatNumber(trip.capacityKg, 0)} kg · no mide volumen`}
+              value={
+                metrics.loadUtilizationPct === null
+                  ? "N/D"
+                  : `${formatNumber(metrics.loadUtilizationPct)}%`
+              }
+              detail={
+                metrics.loadUtilizationPct === null
+                  ? "Ingresa capacidad y manifiesto para calcularlo; no mide volumen."
+                  : `${formatNumber(metrics.loadWeightKg, 0)} kg de ${formatNumber(trip.capacityKg, 0)} kg · no mide volumen`
+              }
             />
             <Metric
               label="Avance de entrega por bultos"
-              value={metrics.deliveryProgressPct === null ? "N/D" : `${formatNumber(metrics.deliveryProgressPct)}%`}
-              detail={`${formatNumber(metrics.deliveredWeightKg, 0)} kg entregados`}
+              value={
+                metrics.deliveryProgressPct === null
+                  ? "N/D"
+                  : `${formatNumber(metrics.deliveryProgressPct)}%`
+              }
+              detail={
+                metrics.deliveryProgressPct === null
+                  ? "Agrega bultos al manifiesto y marca los entregados."
+                  : `${formatNumber(metrics.deliveredWeightKg, 0)} kg entregados`
+              }
             />
-            <Metric label="Costo por km total" value={formatUnitCOP(metrics.costPerKmCop)} detail={`${formatNumber(metrics.totalKm, 0)} km cargado + vacío`} />
-            <Metric label="Flete por tonelada-km cargada" value={formatUnitCOP(metrics.revenuePerLoadedTonKmCop)} detail="Usa solo flete base, peso manifestado y km cargados" />
-            <Metric label="Rendimiento de combustible" value={metrics.fuelEfficiencyKmPerLiter === null ? "N/D" : `${formatNumber(metrics.fuelEfficiencyKmPerLiter, 2)} km/l`} detail={`ACPM: ${formatCOP(metrics.fuelExpenseCop)} · ${formatUnitCOP(metrics.fuelCostPerLiterCop)}/litro`} />
+            <Metric
+              label="Costo por km total"
+              value={formatUnitCOP(metrics.costPerKmCop)}
+              detail={`${formatNumber(metrics.totalKm, 0)} km cargado + vacío`}
+            />
+            <Metric
+              label="Flete por tonelada-km cargada"
+              value={formatUnitCOP(metrics.revenuePerLoadedTonKmCop)}
+              detail="Usa solo flete base, peso manifestado y km cargados"
+            />
+            <Metric
+              label="Rendimiento de combustible"
+              value={
+                metrics.fuelEfficiencyKmPerLiter === null
+                  ? "N/D"
+                  : `${formatNumber(metrics.fuelEfficiencyKmPerLiter, 2)} km/l`
+              }
+              detail={`ACPM: ${formatCOP(metrics.fuelExpenseCop)} · ${formatUnitCOP(metrics.fuelCostPerLiterCop)}/litro`}
+            />
             <Metric
               label="Diferencia de arqueo del conductor"
-              value={formatCOP(metrics.driverCashDifferenceCop)}
+              value={
+                trip.driverAdvanceCop + metrics.cashExpensesCop + trip.driverCashReturnedCop === 0
+                  ? "N/D"
+                  : formatCOP(metrics.driverCashDifferenceCop)
+              }
               detail={
-                Math.abs(metrics.driverCashDifferenceCop) < 0.01
-                  ? "Cuadrado con los gastos pagados de caja y el reintegro"
-                  : metrics.driverCashDifferenceCop > 0
-                    ? "Efectivo pendiente de reintegrar o soportar"
-                    : "Gastos pagados por el conductor por encima del anticipo"
+                trip.driverAdvanceCop + metrics.cashExpensesCop + trip.driverCashReturnedCop === 0
+                  ? "Registra anticipo, gastos de caja o reintegro para hacer el arqueo."
+                  : Math.abs(metrics.driverCashDifferenceCop) < 0.01
+                    ? "Cuadrado con los gastos pagados de caja y el reintegro"
+                    : metrics.driverCashDifferenceCop > 0
+                      ? "Efectivo pendiente de reintegrar o soportar"
+                      : "Gastos pagados por el conductor por encima del anticipo"
               }
             />
           </div>
         </section>
 
-        <button
-          type="submit"
-          disabled={saving || loading}
-          className="btn-emerald inline-flex w-full items-center justify-center gap-2 disabled:opacity-50"
-        >
-          <Save className="h-4 w-4" /> {saving ? "Guardando viaje…" : trip.id ? "Actualizar viaje y manifiesto" : "Guardar viaje y manifiesto"}
-        </button>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button
+            type="submit"
+            disabled={saving || loading}
+            className="btn-emerald inline-flex w-full items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <Save className="h-4 w-4" />{" "}
+            {saving
+              ? "Guardando viaje…"
+              : trip.id
+                ? "Actualizar viaje y manifiesto"
+                : "Guardar viaje y manifiesto"}
+          </button>
+          <button
+            type="button"
+            onClick={() => exportTripPdf(trip)}
+            disabled={loading}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-neon/30 px-3 py-2 text-sm text-neon transition hover:bg-neon/10 disabled:opacity-50"
+          >
+            <FileDown className="h-4 w-4" /> Descargar reporte PDF
+          </button>
+        </div>
         {trip.id && (
           <button
             type="button"
@@ -755,14 +1069,30 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
             Comparativo de los últimos 12 viajes guardados; el flete incluye los recargos pactados.
           </p>
           {historyChart.length === 0 ? (
-            <p className="py-10 text-center text-xs text-muted-foreground">Guarda viajes para comparar sus resultados.</p>
+            <p className="py-10 text-center text-xs text-muted-foreground">
+              Guarda viajes para comparar sus resultados.
+            </p>
           ) : (
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={historyChart} margin={{ top: 8, right: 8, left: 4, bottom: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
-                <XAxis dataKey="label" tick={{ fill: "#94a3b8", fontSize: 9 }} angle={-20} textAnchor="end" interval={0} />
-                <YAxis tick={{ fill: "#94a3b8", fontSize: 9 }} tickFormatter={(value: number) => new Intl.NumberFormat("es-CO", { notation: "compact" }).format(value)} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => formatCOP(value)} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fill: "#94a3b8", fontSize: 9 }}
+                  angle={-20}
+                  textAnchor="end"
+                  interval={0}
+                />
+                <YAxis
+                  tick={{ fill: "#94a3b8", fontSize: 9 }}
+                  tickFormatter={(value: number) =>
+                    new Intl.NumberFormat("es-CO", { notation: "compact" }).format(value)
+                  }
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(value: number) => formatCOP(value)}
+                />
                 <Legend wrapperStyle={{ fontSize: 10 }} />
                 <Bar dataKey="Flete + recargos" fill="#38bdf8" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="Costo directo" fill="#fbbf24" radius={[3, 3, 0, 0]} />
@@ -774,16 +1104,29 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
         <section className="rounded-lg border border-white/10 bg-black/20 p-4">
           <h3 className="mb-3 text-sm font-semibold">Composición de costos del viaje en edición</h3>
           {expenseChart.length === 0 ? (
-            <p className="py-10 text-center text-xs text-muted-foreground">Agrega gastos para ver su composición.</p>
+            <p className="py-10 text-center text-xs text-muted-foreground">
+              Agrega gastos para ver su composición.
+            </p>
           ) : (
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
-                <Pie data={expenseChart} dataKey="amountCop" nameKey="category" cx="50%" cy="45%" outerRadius={90} labelLine={false}>
+                <Pie
+                  data={expenseChart}
+                  dataKey="amountCop"
+                  nameKey="category"
+                  cx="50%"
+                  cy="45%"
+                  outerRadius={90}
+                  labelLine={false}
+                >
                   {expenseChart.map((entry, index) => (
                     <Cell key={entry.category} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => formatCOP(value)} />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(value: number) => formatCOP(value)}
+                />
                 <Legend wrapperStyle={{ fontSize: 10 }} />
               </PieChart>
             </ResponsiveContainer>
@@ -827,15 +1170,40 @@ export function TransportTripCalculator({ userId }: { userId: string }) {
                   return (
                     <tr key={savedTrip.id} className="border-t border-white/5">
                       <td className="p-3">
-                        <div className="font-medium">{savedTrip.origin} → {savedTrip.destination}</div>
-                        <div className="text-[10px] text-muted-foreground">{savedTrip.tripDate} · {savedTrip.driverName || "Sin conductor asignado"}</div>
+                        <div className="font-medium">
+                          {savedTrip.origin} → {savedTrip.destination}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {savedTrip.tripDate} · {savedTrip.driverName || "Sin conductor asignado"}
+                        </div>
                       </td>
                       <td className="p-3 font-mono">{savedTrip.vehiclePlate}</td>
-                      <td className="p-3 text-right font-mono">{formatCOP(savedMetrics.contractRevenueCop)}</td>
-                      <td className="p-3 text-right font-mono">{formatCOP(savedMetrics.tripCostsCop)}</td>
-                      <td className={`p-3 text-right font-mono ${savedMetrics.operatingProfitCop < 0 ? "text-rose-300" : "text-emerald-300"}`}>{formatCOP(savedMetrics.operatingProfitCop)}</td>
-                      <td className="p-3 text-right font-mono">{savedMetrics.loadUtilizationPct === null ? "N/D" : `${formatNumber(savedMetrics.loadUtilizationPct)}%`}</td>
+                      <td className="p-3 text-right font-mono">
+                        {formatCOP(savedMetrics.contractRevenueCop)}
+                      </td>
+                      <td className="p-3 text-right font-mono">
+                        {formatCOP(savedMetrics.tripCostsCop)}
+                      </td>
+                      <td
+                        className={`p-3 text-right font-mono ${savedMetrics.operatingProfitCop < 0 ? "text-rose-300" : "text-emerald-300"}`}
+                      >
+                        {formatCOP(savedMetrics.operatingProfitCop)}
+                      </td>
+                      <td className="p-3 text-right font-mono">
+                        {savedMetrics.loadUtilizationPct === null
+                          ? "N/D"
+                          : `${formatNumber(savedMetrics.loadUtilizationPct)}%`}
+                      </td>
                       <td className="p-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => exportTripPdf(savedTrip, false)}
+                          aria-label={`Descargar reporte PDF del viaje ${savedTrip.origin} a ${savedTrip.destination}`}
+                          title="Descargar reporte PDF"
+                          className="mr-1 rounded p-1.5 text-muted-foreground hover:bg-neon/10 hover:text-neon"
+                        >
+                          <FileDown className="h-4 w-4" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => {

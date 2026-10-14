@@ -84,9 +84,7 @@ export function computeTransportTripMetrics(
   );
   const totalKm = trip.loadedKm + trip.emptyKm;
   const customerCollectedCop =
-    trip.customerAdvanceCop +
-    trip.customerFinalPaymentCop +
-    trip.otherCustomerCollectionCop;
+    trip.customerAdvanceCop + trip.customerFinalPaymentCop + trip.otherCustomerCollectionCop;
   const cashExpensesCop = sum(
     trip.expenses
       .filter((expense) => expense.paidFromDriverCash)
@@ -110,40 +108,32 @@ export function computeTransportTripMetrics(
     contractRevenueCop,
     customerCollectedCop,
     customerWithheldCop: trip.customerWithheldCop,
-    customerBalanceCop:
-      contractRevenueCop - customerCollectedCop - trip.customerWithheldCop,
+    customerBalanceCop: contractRevenueCop - customerCollectedCop - trip.customerWithheldCop,
     tripCostsCop,
     operatingProfitCop,
     operatingMarginPct:
       contractRevenueCop > 0 ? (operatingProfitCop / contractRevenueCop) * 100 : null,
-    breakEvenFreightCop:
-      tripCostsCop > 0 ? Math.max(0, tripCostsCop - trip.surchargeCop) : null,
+    breakEvenFreightCop: tripCostsCop > 0 ? Math.max(0, tripCostsCop - trip.surchargeCop) : null,
     requiredFreightAtTargetCop:
       tripCostsCop > 0
         ? Math.ceil(Math.max(0, tripCostsCop / (1 - margin / 100) - trip.surchargeCop))
         : null,
     loadWeightKg,
     deliveredWeightKg,
-    loadUtilizationPct:
-      trip.capacityKg > 0 ? (loadWeightKg / trip.capacityKg) * 100 : null,
-    deliveryProgressPct:
-      totalPackages > 0 ? (deliveredPackages / totalPackages) * 100 : null,
+    loadUtilizationPct: trip.capacityKg > 0 ? (loadWeightKg / trip.capacityKg) * 100 : null,
+    deliveryProgressPct: totalPackages > 0 ? (deliveredPackages / totalPackages) * 100 : null,
     totalKm,
     costPerKmCop: totalKm > 0 ? tripCostsCop / totalKm : null,
     revenuePerLoadedTonKmCop:
       trip.loadedKm > 0 && loadWeightKg > 0
         ? trip.freightCop / ((loadWeightKg / 1000) * trip.loadedKm)
         : null,
-    fuelEfficiencyKmPerLiter:
-      totalKm > 0 && trip.fuelLiters > 0 ? totalKm / trip.fuelLiters : null,
+    fuelEfficiencyKmPerLiter: totalKm > 0 && trip.fuelLiters > 0 ? totalKm / trip.fuelLiters : null,
     fuelCostPerLiterCop:
-      fuelExpenseCop > 0 && trip.fuelLiters > 0
-        ? fuelExpenseCop / trip.fuelLiters
-        : null,
+      fuelExpenseCop > 0 && trip.fuelLiters > 0 ? fuelExpenseCop / trip.fuelLiters : null,
     fuelExpenseCop,
     cashExpensesCop,
-    driverCashDifferenceCop:
-      trip.driverAdvanceCop - cashExpensesCop - trip.driverCashReturnedCop,
+    driverCashDifferenceCop: trip.driverAdvanceCop - cashExpensesCop - trip.driverCashReturnedCop,
     expenseBreakdown: [...expenseGroups.entries()]
       .map(([category, amountCop]) => ({ category, amountCop }))
       .sort((a, b) => b.amountCop - a.amountCop),
@@ -154,12 +144,24 @@ export function validateTransportTrip(trip: TransportTrip): string | null {
   if (!trip.tripDate || !trip.origin.trim() || !trip.destination.trim()) {
     return "Completa la fecha y la ruta de origen y destino.";
   }
-  if (!trip.vehiclePlate.trim()) return "Ingresa la placa del vehículo.";
-  if (!Number.isFinite(trip.capacityKg) || trip.capacityKg <= 0) {
-    return "La capacidad de carga debe ser mayor que cero.";
+  if (!Number.isFinite(trip.freightCop) || (!trip.id && trip.freightCop <= 0)) {
+    return "Ingresa el valor del flete pactado para calcular el resultado del viaje.";
   }
-  if (trip.cargoItems.length === 0) return "Agrega al menos una línea al manifiesto de carga.";
   for (const item of trip.cargoItems) {
+    if (
+      !Number.isFinite(item.packages) ||
+      !Number.isFinite(item.weightKg) ||
+      !Number.isFinite(item.declaredValueCop)
+    ) {
+      return "Revisa los valores numéricos de cada línea de carga.";
+    }
+    const hasCargoData =
+      item.description.trim() ||
+      item.document.trim() ||
+      item.packages > 0 ||
+      item.weightKg > 0 ||
+      item.declaredValueCop > 0;
+    if (!hasCargoData) continue;
     if (
       !item.description.trim() ||
       !Number.isFinite(item.packages) ||
@@ -174,11 +176,7 @@ export function validateTransportTrip(trip: TransportTrip): string | null {
       return "Revisa la descripción, unidades, peso y valor declarado de cada carga.";
     }
   }
-  const measurements = [
-    trip.loadedKm,
-    trip.emptyKm,
-    trip.fuelLiters,
-  ];
+  const measurements = [trip.loadedKm, trip.emptyKm, trip.fuelLiters, trip.capacityKg];
   if (measurements.some((amount) => !Number.isFinite(amount) || amount < 0)) {
     return "Los kilómetros y litros deben ser números válidos no negativos.";
   }
@@ -192,7 +190,9 @@ export function validateTransportTrip(trip: TransportTrip): string | null {
     trip.driverAdvanceCop,
     trip.driverCashReturnedCop,
   ];
-  if (copAmounts.some((amount) => !Number.isFinite(amount) || !Number.isInteger(amount) || amount < 0)) {
+  if (
+    copAmounts.some((amount) => !Number.isFinite(amount) || !Number.isInteger(amount) || amount < 0)
+  ) {
     return "Los valores monetarios en COP deben ser números enteros no negativos.";
   }
   if (
