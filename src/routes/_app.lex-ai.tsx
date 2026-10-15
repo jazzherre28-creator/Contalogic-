@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { supabase } from "@/integrations/supabase/client";
 import { Sparkles, Send, Loader2, User2, Bot } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
@@ -19,17 +20,18 @@ function LexAiPage() {
   const [streaming, setStreaming] = useState(false);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
-  const suggestions = profile?.entity_type === "juridica"
-    ? [
-        "¿Qué requisitos exige el Art. 107 ET para deducir un gasto?",
-        "Diferencias entre Renta Líquida y Renta Presuntiva",
-        "¿Cuándo es obligatorio facturar electrónicamente?",
-      ]
-    : [
-        "¿Me conviene el Régimen Simple de Tributación?",
-        "Deducciones personales que puedo aplicar este año",
-        "¿Cómo funcionan las cédulas en la declaración de renta?",
-      ];
+  const suggestions =
+    profile?.entity_type === "juridica"
+      ? [
+          "¿Qué requisitos exige el Art. 107 ET para deducir un gasto?",
+          "Diferencias entre Renta Líquida y Renta Presuntiva",
+          "¿Cuándo es obligatorio facturar electrónicamente?",
+        ]
+      : [
+          "¿Me conviene el Régimen Simple de Tributación?",
+          "Deducciones personales que puedo aplicar este año",
+          "¿Cómo funcionan las cédulas en la declaración de renta?",
+        ];
 
   const send = async (text?: string) => {
     const content = (text ?? input).trim();
@@ -41,12 +43,20 @@ function LexAiPage() {
     setStreaming(true);
 
     try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (!sessionData.session) {
+        throw new Error("Tu sesión expiró. Inicia sesión nuevamente para usar LEX AI.");
+      }
+
       const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/lex-ai-chat`;
       const resp = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          apikey:
+            import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${sessionData.session.access_token}`,
         },
         body: JSON.stringify({
           messages: next,
@@ -55,12 +65,17 @@ function LexAiPage() {
         }),
       });
 
-      if (!resp.ok || !resp.body) {
-        if (resp.status === 429) toast.error("Demasiadas solicitudes, intenta luego.");
-        else if (resp.status === 402) toast.error("Créditos AI agotados. Recarga tu workspace.");
-        else toast.error("Error contactando a LEX AI");
-        setStreaming(false);
+      if (!resp.ok) {
+        const payload = (await resp.json()) as { error?: unknown };
+        const message =
+          typeof payload.error === "string"
+            ? payload.error
+            : `LEX AI rechazó la solicitud (HTTP ${resp.status}).`;
+        toast.error(message);
         return;
+      }
+      if (!resp.body) {
+        throw new Error("LEX AI respondió sin contenido. Intenta de nuevo.");
       }
 
       const reader = resp.body.getReader();
@@ -194,7 +209,11 @@ function LexAiPage() {
             disabled={streaming}
           />
           <button type="submit" className="btn-emerald !px-4" disabled={streaming || !input.trim()}>
-            {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {streaming ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
           </button>
         </form>
       </div>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, Check, Trash2, X, Sparkles, BellRing } from "lucide-react";
+import { Bell, Check, Trash2, X, Sparkles, BellRing, Loader2 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
@@ -20,22 +20,30 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notif[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     if (!user) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from("notifications")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(30);
-    if (error) {
+    try {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      setItems((data ?? []) as Notif[]);
+      setLoadError(null);
+    } catch (error) {
+      console.error("No se pudieron cargar las notificaciones", error);
+      setLoadError("No se pudieron cargar las notificaciones. Intenta nuevamente.");
       toast.error("No se pudieron cargar las notificaciones");
+    } finally {
+      setLoading(false);
     }
-    setItems((data ?? []) as Notif[]);
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -46,7 +54,7 @@ export function NotificationBell() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
-        () => load()
+        () => load(),
       )
       .subscribe();
     return () => {
@@ -68,33 +76,81 @@ export function NotificationBell() {
 
   const markAllRead = async () => {
     if (!user || unread === 0) return;
-    await supabase.from("notifications").update({ read: true }).eq("user_id", user.id).eq("read", false);
-    load();
+    const { error } = await supabase
+      .from("notifications")
+      .update({ read: true })
+      .eq("user_id", user.id)
+      .eq("read", false);
+    if (error) {
+      toast.error("No se pudieron marcar las notificaciones como leídas: " + error.message);
+      return;
+    }
+    await load();
   };
 
   const markRead = async (id: string) => {
-    await supabase.from("notifications").update({ read: true }).eq("id", id);
-    load();
+    if (!user) return;
+    const { error } = await supabase
+      .from("notifications")
+      .update({ read: true })
+      .eq("id", id)
+      .eq("user_id", user.id);
+    if (error) {
+      toast.error("No se pudo marcar la notificación como leída: " + error.message);
+      return;
+    }
+    await load();
   };
 
   const remove = async (id: string) => {
-    await supabase.from("notifications").delete().eq("id", id);
-    load();
+    if (!user) return;
+    const { error } = await supabase
+      .from("notifications")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", user.id);
+    if (error) {
+      toast.error("No se pudo eliminar la notificación: " + error.message);
+      return;
+    }
+    await load();
   };
 
   const sendTestNotification = async () => {
-    if (!user) return;
-    const { error } = await supabase.from("notifications").insert({
-      user_id: user.id,
-      title: "Notificación de prueba",
-      body: "¡Funciona! Aquí verás los recordatorios de tu calendario tributario cuando un vencimiento esté a 3 o 1 día.",
-      kind: "info",
-      link: "/calendar",
-    });
-    if (error) {
-      toast.error("Error al enviar prueba: " + error.message);
-    } else {
+    if (!user || testing) return;
+    setTesting(true);
+    try {
+      const { data, error } = await supabase
+        .from("notifications")
+        .insert({
+          user_id: user.id,
+          title: "Notificación de prueba",
+          body: "¡Funciona! Aquí verás los recordatorios de tu calendario tributario cuando un vencimiento esté a 3 o 1 día.",
+          kind: "info",
+          link: "/calendar",
+        })
+        .select("*")
+        .single();
+      if (error) throw error;
+      setItems((current) =>
+        [data as Notif, ...current.filter((item) => item.id !== data.id)].slice(0, 30),
+      );
+      setLoadError(null);
       toast.success("Notificación de prueba enviada");
+    } catch (error) {
+      console.error("Error al enviar la notificación de prueba", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === "object" &&
+              error !== null &&
+              "message" in error &&
+              typeof error.message === "string"
+            ? error.message
+            : "Error inesperado";
+      toast.error("Error al enviar la prueba: " + message);
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -131,6 +187,19 @@ export function NotificationBell() {
                 )}
               </div>
               <div className="flex gap-1">
+                <button
+                  onClick={sendTestNotification}
+                  disabled={testing}
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-neon transition hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
+                  title="Crear una notificación de prueba"
+                >
+                  {testing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  Probar
+                </button>
                 {unread > 0 && (
                   <button
                     onClick={markAllRead}
@@ -152,24 +221,34 @@ export function NotificationBell() {
             <div className="max-h-[60vh] overflow-y-auto sm:max-h-[420px]">
               {loading ? (
                 <div className="px-5 py-10 text-center text-sm text-slate-400">Cargando…</div>
+              ) : loadError ? (
+                <div className="space-y-3 px-5 py-7 text-center">
+                  <p role="alert" className="text-sm text-rose-300">
+                    {loadError}
+                  </p>
+                  <button
+                    onClick={load}
+                    className="rounded-xl border border-slate-700 bg-slate-800/90 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800"
+                  >
+                    Reintentar
+                  </button>
+                </div>
               ) : items.length === 0 ? (
                 <div className="space-y-4 px-5 py-7 text-center">
                   <BellRing className="mx-auto h-10 w-10 text-slate-500" />
-                  <div className="text-sm font-semibold text-slate-100">No tienes notificaciones todavía.</div>
+                  <div className="text-sm font-semibold text-slate-100">
+                    No tienes notificaciones todavía.
+                  </div>
                   <div className="rounded-2xl border border-white/10 bg-slate-900/90 p-4 text-left">
-                    <div className="text-sm font-semibold text-neon">¿Cómo recibo notificaciones?</div>
+                    <div className="text-sm font-semibold text-neon">
+                      ¿Cómo recibo notificaciones?
+                    </div>
                     <ol className="mt-2 space-y-1 pl-4 text-sm text-slate-300">
                       <li>1. Ve al Calendario Tributario</li>
                       <li>2. Activa la campanita 🔔 en una obligación</li>
                       <li>3. Recibirás aviso 3 y 1 día antes del vencimiento</li>
                     </ol>
                   </div>
-                  <button
-                    onClick={sendTestNotification}
-                    className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/90 px-4 py-2 text-sm font-semibold text-neon transition hover:bg-slate-800"
-                  >
-                    <Sparkles className="h-4 w-4" /> Probar notificación
-                  </button>
                 </div>
               ) : (
                 <ul className="divide-y divide-white/10">
@@ -186,12 +265,19 @@ export function NotificationBell() {
                         className={`px-5 py-4 transition ${!n.read ? "bg-slate-900/80" : "bg-slate-950/90"} hover:bg-slate-900/95`}
                       >
                         <div className="flex items-start gap-3">
-                          <div className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${!n.read ? "bg-cyan-300" : "bg-slate-700"}`} />
+                          <div
+                            className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${!n.read ? "bg-cyan-300" : "bg-slate-700"}`}
+                          />
                           <div className="min-w-0 flex-1">
                             <div className={`text-sm font-semibold ${tone}`}>{n.title}</div>
                             <div className="mt-1 text-sm leading-6 text-slate-300">{n.body}</div>
                             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                              <span className="font-mono">{new Date(n.created_at).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" })}</span>
+                              <span className="font-mono">
+                                {new Date(n.created_at).toLocaleString("es-CO", {
+                                  dateStyle: "short",
+                                  timeStyle: "short",
+                                })}
+                              </span>
                               {n.link && (
                                 <Link
                                   to={n.link as "/calendar"}
