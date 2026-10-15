@@ -43,20 +43,29 @@ ${enfoqueLegal}
 - Si la pregunta es ambigua, pide aclaración breve.
 - Aclara que tus respuestas son orientativas y no reemplazan a un contador público titulado.`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${encodeURIComponent(LOVABLE_API_KEY)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: messages.map((message: { role: string; content: string }) => ({
-            role: message.role === "assistant" ? "model" : "user",
-            parts: [{ text: message.content }],
-          })),
-        }),
-      },
-    );
+    const requestModel = (model: string) =>
+      fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(LOVABLE_API_KEY)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            contents: messages.map((message: { role: string; content: string }) => ({
+              role: message.role === "assistant" ? "model" : "user",
+              parts: [{ text: message.content }],
+            })),
+          }),
+        },
+      );
+    let response = await requestModel("gemini-3.8-flash");
+    if ([404, 429, 503].includes(response.status)) {
+      console.warn("Gemini primary model unavailable; retrying with gemini-2.5-flash", {
+        status: response.status,
+      });
+      await response.body?.cancel();
+      response = await requestModel("gemini-2.5-flash");
+    }
 
     if (!response.ok) {
       if (response.status === 429) {

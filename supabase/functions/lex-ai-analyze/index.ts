@@ -113,17 +113,26 @@ ${textPreview}
 
 Analiza todas las cifras disponibles de este documento y verifica la consistencia aritmética de cada subtotal y total. No omitas alertas de conciliación ni reemplaces los datos reportados por cifras supuestas.`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-        }),
-      },
-    );
+    const requestModel = (model: string) =>
+      fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+          }),
+        },
+      );
+    let response = await requestModel("gemini-3.8-flash");
+    if ([404, 429, 503].includes(response.status)) {
+      console.warn("Gemini primary model unavailable; retrying with gemini-2.5-flash", {
+        status: response.status,
+      });
+      await response.body?.cancel();
+      response = await requestModel("gemini-2.5-flash");
+    }
 
     if (!response.ok) {
       if (response.status === 429) {
