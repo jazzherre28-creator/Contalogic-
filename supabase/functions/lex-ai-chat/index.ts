@@ -58,13 +58,16 @@ ${enfoqueLegal}
           }),
         },
       );
-    let response = await requestModel("gemini-3.8-flash");
-    if ([404, 429, 503].includes(response.status)) {
-      console.warn("Gemini primary model unavailable; retrying with gemini-2.5-flash", {
+    const models = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"];
+    let response = await requestModel(models[0]);
+    for (const model of models.slice(1)) {
+      if (![404, 429, 503].includes(response.status)) break;
+      console.warn("Gemini model unavailable; trying the next supported model", {
+        model,
         status: response.status,
       });
       await response.body?.cancel();
-      response = await requestModel("gemini-2.5-flash");
+      response = await requestModel(model);
     }
 
     if (!response.ok) {
