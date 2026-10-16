@@ -53,6 +53,8 @@ function documentLabel(doc: ComparativeDoc) {
 
 const equityTotalLabel =
   /^(?:total(?:es)?\s+)?patrimonio(?:\s+neto)?(?:\s+de\s+los\s+accionistas?)?$/i;
+const classifiedEquityTotalLabel =
+  /(?:^|\b)patrimonio(?:\s+neto)?$|(?:^|\b)total(?:es)?\s+patrimonio(?:\s+neto)?$|(?:^|\b)capital\s+(?:contable|propiedad)$/i;
 
 function classifyBalance(doc: ComparativeDoc) {
   const totals = doc.parsed_data?.totals ?? {};
@@ -62,7 +64,10 @@ function classifyBalance(doc: ComparativeDoc) {
   if (!explicitEquity) return classifyTotals(totals);
 
   const totalsWithoutEquity = Object.fromEntries(
-    Object.entries(totals).filter(([label]) => !equityTotalLabel.test(label.trim())),
+    Object.entries(totals).filter(
+      ([label]) =>
+        !equityTotalLabel.test(label.trim()) && !classifiedEquityTotalLabel.test(label.trim()),
+    ),
   );
   return classifyTotals({ ...totalsWithoutEquity, Patrimonio: explicitEquity.value });
 }
