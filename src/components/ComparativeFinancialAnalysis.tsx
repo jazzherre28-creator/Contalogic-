@@ -6,6 +6,7 @@ type ComparativeDoc = {
   doc_type: "balance" | "pnl";
   parsed_data: {
     totals?: Record<string, number>;
+    lineItems?: Array<{ label: string; value: number; period?: string }>;
     meta?: {
       periodLabel?: string;
     };
@@ -44,12 +45,25 @@ function documentLabel(doc: ComparativeDoc) {
     : `${name} · ${new Date(doc.created_at).toLocaleDateString("es-CO")}`;
 }
 
-function balanceMetrics(
-  previousTotals: Record<string, number>,
-  currentTotals: Record<string, number>,
-) {
-  const previous = classifyTotals(previousTotals);
-  const current = classifyTotals(currentTotals);
+const equityTotalLabel =
+  /^(?:total(?:es)?\s+)?patrimonio(?:\s+neto)?(?:\s+de\s+los\s+accionistas?)?$/i;
+
+function classifyBalance(doc: ComparativeDoc) {
+  const totals = doc.parsed_data?.totals ?? {};
+  const explicitEquity = doc.parsed_data?.lineItems?.find(({ label }) =>
+    equityTotalLabel.test(label.trim()),
+  );
+  if (!explicitEquity) return classifyTotals(totals);
+
+  const totalsWithoutEquity = Object.fromEntries(
+    Object.entries(totals).filter(([label]) => !equityTotalLabel.test(label.trim())),
+  );
+  return classifyTotals({ ...totalsWithoutEquity, Patrimonio: explicitEquity.value });
+}
+
+function balanceMetrics(previousDoc: ComparativeDoc, currentDoc: ComparativeDoc) {
+  const previous = classifyBalance(previousDoc);
+  const current = classifyBalance(currentDoc);
   const previousWorkingCapital =
     previous.hasCurrentAssets && previous.hasCurrentLiabilities
       ? previous.activosCorrientes - previous.pasivosCorrientes
@@ -175,14 +189,8 @@ export function ComparativeFinancialAnalysis({ docs }: { docs: ComparativeDoc[] 
     balanceDocs.find((doc) => doc.id !== closingDoc.id);
   const pnlDoc = pnlDocs.find((doc) => doc.id === pnlId) ?? pnlDocs[0];
 
-  const analysis = openingDoc
-    ? balanceMetrics(openingDoc.parsed_data?.totals ?? {}, closingDoc.parsed_data?.totals ?? {})
-    : null;
-  const closingBalanceAnalysis = balanceMetrics(
-    closingDoc.parsed_data?.totals ?? {},
-    closingDoc.parsed_data?.totals ?? {},
-  );
-  const closingBalance = closingBalanceAnalysis.current;
+  const analysis = openingDoc ? balanceMetrics(openingDoc, closingDoc) : null;
+  const closingBalance = classifyBalance(closingDoc);
   const pnl = pnlDoc ? classifyTotals(pnlDoc.parsed_data?.totals ?? {}) : null;
   const averageAssets =
     analysis?.previous.hasTotalAssets && analysis.current.hasTotalAssets
@@ -321,7 +329,7 @@ export function ComparativeFinancialAnalysis({ docs }: { docs: ComparativeDoc[] 
                 </tr>
               </thead>
               <tbody>
-                {closingBalanceAnalysis.metrics.map((metric) => (
+                {closingBalance.metrics.map((metric) => (
                   <tr key={metric.name} className="border-b border-white/5">
                     <td className="px-3 py-2 text-slate-200">{metric.name}</td>
                     <td className="px-3 py-2 text-right font-mono text-neon">
