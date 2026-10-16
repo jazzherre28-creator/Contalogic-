@@ -196,7 +196,7 @@ function ScannerPage() {
                         )}
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <div className="flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
                       <button
                         onClick={() => setActiveAnalyticsId(isAnalyticsOpen ? null : d.id)}
                         className="inline-flex items-center gap-1.5 rounded-md border border-[oklch(0.92_0.2_105/0.5)] bg-[oklch(0.92_0.2_105/0.1)] px-2.5 py-1.5 text-xs font-semibold text-emerald-glow transition hover:bg-[oklch(0.92_0.2_105/0.2)]"
