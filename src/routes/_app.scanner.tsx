@@ -9,6 +9,7 @@ import { generateScannerReport } from "@/lib/pdf-report";
 import { extractFromFile } from "@/lib/file-extractors";
 import { ScannerAnalytics, computeAdvancedAnalytics } from "@/components/AdvancedAnalytics";
 import { exportScannerAnalysisXLSX } from "@/lib/excel-report";
+import { ComparativeFinancialAnalysis } from "@/components/ComparativeFinancialAnalysis";
 
 export const Route = createFileRoute("/_app/scanner")({
   component: ScannerPage,
@@ -145,6 +146,8 @@ function ScannerPage() {
           onFile={(f) => handleFile(f, "pnl")}
         />
       </div>
+
+      <ComparativeFinancialAnalysis docs={docs} />
 
       <div className="glass p-5">
         <div className="mb-3 flex items-center gap-2">
