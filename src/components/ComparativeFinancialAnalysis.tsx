@@ -8,7 +8,13 @@ type ComparativeDoc = {
     totals?: Record<string, number>;
     lineItems?: Array<{ label: string; value: number; period?: string }>;
     meta?: {
+      entryCount?: number;
+      charCount?: number;
+      source?: string;
+      unitLabel?: string;
+      unitMultiplier?: number;
       periodLabel?: string;
+      comparativePeriodLabel?: string;
     };
   } | null;
   file_name: string | null;
@@ -190,7 +196,8 @@ export function ComparativeFinancialAnalysis({ docs }: { docs: ComparativeDoc[] 
   const pnlDoc = pnlDocs.find((doc) => doc.id === pnlId) ?? pnlDocs[0];
 
   const analysis = openingDoc ? balanceMetrics(openingDoc, closingDoc) : null;
-  const closingBalance = classifyBalance(closingDoc);
+  const closingBalanceAnalysis = balanceMetrics(closingDoc, closingDoc);
+  const closingBalance = closingBalanceAnalysis.current;
   const pnl = pnlDoc ? classifyTotals(pnlDoc.parsed_data?.totals ?? {}) : null;
   const averageAssets =
     analysis?.previous.hasTotalAssets && analysis.current.hasTotalAssets
@@ -329,7 +336,7 @@ export function ComparativeFinancialAnalysis({ docs }: { docs: ComparativeDoc[] 
                 </tr>
               </thead>
               <tbody>
-                {closingBalance.metrics.map((metric) => (
+                {closingBalanceAnalysis.metrics.map((metric) => (
                   <tr key={metric.name} className="border-b border-white/5">
                     <td className="px-3 py-2 text-slate-200">{metric.name}</td>
                     <td className="px-3 py-2 text-right font-mono text-neon">
