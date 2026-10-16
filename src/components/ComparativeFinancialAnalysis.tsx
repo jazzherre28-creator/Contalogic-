@@ -178,6 +178,11 @@ export function ComparativeFinancialAnalysis({ docs }: { docs: ComparativeDoc[] 
   const analysis = openingDoc
     ? balanceMetrics(openingDoc.parsed_data?.totals ?? {}, closingDoc.parsed_data?.totals ?? {})
     : null;
+  const closingBalanceAnalysis = balanceMetrics(
+    closingDoc.parsed_data?.totals ?? {},
+    closingDoc.parsed_data?.totals ?? {},
+  );
+  const closingBalance = closingBalanceAnalysis.current;
   const pnl = pnlDoc ? classifyTotals(pnlDoc.parsed_data?.totals ?? {}) : null;
   const averageAssets =
     analysis?.previous.hasTotalAssets && analysis.current.hasTotalAssets
@@ -188,22 +193,33 @@ export function ComparativeFinancialAnalysis({ docs }: { docs: ComparativeDoc[] 
       ? (analysis.previous.patrimonio + analysis.current.patrimonio) / 2
       : null;
   const netIncome = pnl?.hasNetIncome ? pnl.utilidadNeta : null;
+  const returnAssets = analysis
+    ? averageAssets
+    : closingBalance.hasTotalAssets
+      ? closingBalance.activos
+      : null;
+  const returnEquity = analysis
+    ? averageEquity
+    : closingBalance.hasEquity
+      ? closingBalance.patrimonio
+      : null;
+  const returnBasis = analysis ? "promedio" : "saldo al cierre";
   const returnMetrics: Metric[] = [
     {
-      name: "ROA · utilidad neta / activos promedio",
+      name: `ROA · utilidad neta / activos ${returnBasis}`,
       previous: null,
       current:
-        netIncome != null && averageAssets != null && averageAssets > 0
-          ? (netIncome / averageAssets) * 100
+        netIncome != null && returnAssets != null && returnAssets > 0
+          ? (netIncome / returnAssets) * 100
           : null,
       unit: "percent",
     },
     {
-      name: "ROE · utilidad neta / patrimonio promedio",
+      name: `ROE · utilidad neta / patrimonio ${returnBasis}`,
       previous: null,
       current:
-        netIncome != null && averageEquity != null && averageEquity > 0
-          ? (netIncome / averageEquity) * 100
+        netIncome != null && returnEquity != null && returnEquity > 0
+          ? (netIncome / returnEquity) * 100
           : null,
       unit: "percent",
     },
@@ -219,12 +235,7 @@ export function ComparativeFinancialAnalysis({ docs }: { docs: ComparativeDoc[] 
         </p>
       </div>
 
-      {balanceDocs.length < 2 ? (
-        <p className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-sm text-muted-foreground">
-          Carga otro estado de situación financiera para comparar periodos y calcular ROA/ROE con
-          saldos promedio.
-        </p>
-      ) : (
+      {balanceDocs.length >= 2 ? (
         <>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="space-y-1 text-xs text-muted-foreground">
@@ -291,43 +302,83 @@ export function ComparativeFinancialAnalysis({ docs }: { docs: ComparativeDoc[] 
               </table>
             </div>
           )}
-
-          {pnlDocs.length > 0 ? (
-            <label className="block max-w-2xl space-y-1 text-xs text-muted-foreground">
-              Estado de resultados para rentabilidad (opcional)
-              <select
-                value={pnlDoc?.id ?? ""}
-                onChange={(event) => setPnlId(event.target.value)}
-                className="input-neon w-full text-sm"
-              >
-                {pnlDocs.map((doc) => (
-                  <option key={doc.id} value={doc.id}>
-                    {documentLabel(doc)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-100">
-              ROA y ROE requieren utilidad neta del estado de resultados, además de ambos balances.
-              Carga también el P&amp;L del periodo para calcularlos.
-            </p>
-          )}
-
-          {pnlDoc && netIncome == null && (
-            <p className="text-xs text-amber-100">
-              El P&amp;L seleccionado no presenta utilidad neta identificable; ROA y ROE quedan como
-              N/D para no estimar el resultado.
-            </p>
-          )}
-          {pnlDoc && netIncome != null && (
-            <p className="text-xs text-muted-foreground">
-              ROA/ROE usan la utilidad neta explícita del P&amp;L seleccionado y el promedio de los
-              saldos inicial y final. Confirma que los tres documentos correspondan al mismo
-              ejercicio y unidad monetaria.
-            </p>
-          )}
         </>
+      ) : (
+        <div className="space-y-3">
+          <p className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-sm text-muted-foreground">
+            Análisis integrado del balance disponible y el estado de resultados. Para comparar
+            cambios entre periodos necesitas cargar otro balance.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Balance seleccionado: {documentLabel(closingDoc)}
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-white/10">
+            <table className="w-full min-w-[360px] text-xs">
+              <thead className="bg-slate-950/80 text-muted-foreground">
+                <tr className="border-b border-white/10">
+                  <th className="px-3 py-2 text-left">Indicador del balance</th>
+                  <th className="px-3 py-2 text-right">Valor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {closingBalanceAnalysis.metrics.map((metric) => (
+                  <tr key={metric.name} className="border-b border-white/5">
+                    <td className="px-3 py-2 text-slate-200">{metric.name}</td>
+                    <td className="px-3 py-2 text-right font-mono text-neon">
+                      {formatMetric(metric.current, metric.unit)}
+                    </td>
+                  </tr>
+                ))}
+                {returnMetrics.map((metric) => (
+                  <tr key={metric.name} className="border-b border-white/5">
+                    <td className="px-3 py-2 text-slate-200">{metric.name}</td>
+                    <td className="px-3 py-2 text-right font-mono text-neon">
+                      {formatMetric(metric.current, metric.unit)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {pnlDocs.length > 0 ? (
+        <label className="block max-w-2xl space-y-1 text-xs text-muted-foreground">
+          Estado de resultados para rentabilidad (opcional)
+          <select
+            value={pnlDoc?.id ?? ""}
+            onChange={(event) => setPnlId(event.target.value)}
+            className="input-neon w-full text-sm"
+          >
+            {pnlDocs.map((doc) => (
+              <option key={doc.id} value={doc.id}>
+                {documentLabel(doc)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-100">
+          ROA y ROE requieren utilidad neta del estado de resultados. Carga también el P&amp;L para
+          calcularlos.
+        </p>
+      )}
+
+      {pnlDoc && netIncome == null && (
+        <p className="text-xs text-amber-100">
+          El P&amp;L seleccionado no presenta utilidad neta identificable; ROA y ROE quedan como N/D
+          para no estimar el resultado.
+        </p>
+      )}
+      {pnlDoc && netIncome != null && (
+        <p className="text-xs text-muted-foreground">
+          ROA/ROE usan la utilidad neta explícita del P&amp;L seleccionado.{" "}
+          {analysis
+            ? "Se calculan sobre los saldos promedio de ambos balances."
+            : "Con un solo balance, se calculan sobre activos y patrimonio al cierre; no equivalen al método estándar con saldos promedio."}{" "}
+          Confirma que los documentos correspondan a la misma entidad, periodo y unidad monetaria.
+        </p>
       )}
     </section>
   );
