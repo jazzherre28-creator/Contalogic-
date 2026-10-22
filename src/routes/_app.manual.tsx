@@ -8,12 +8,14 @@ import {
   CalendarDays,
   BookOpen,
   Crown,
+  TrendingDown,
   TrendingUp,
   ShieldCheck,
   Bell,
   FileDown,
   HelpCircle,
   Rocket,
+  Truck,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/manual")({
@@ -34,7 +36,7 @@ const STEPS = [
   {
     n: 3,
     title: "Sube tus estados financieros",
-    body: "En el Escáner OCR carga foto del Estado de Situación Financiera, Estado de Resultados (P&L) o facturas. Tesseract.js extrae texto y números. Luego tocas 'Analizar con LEX AI' para recibir oportunidades de ahorro citando artículos del ET.",
+    body: "En Escáner OCR elige Estado de Situación Financiera o Estado de Resultados y carga una imagen, PDF, Word, Excel o CSV. Verifica periodo, moneda y unidad (pesos, miles o millones): Datos conserva las cifras impresas; los indicadores se normalizan a COP cuando aplica.",
   },
   {
     n: 4,
@@ -44,12 +46,12 @@ const STEPS = [
   {
     n: 5,
     title: "Descarga informes PDF",
-    body: "Cada módulo (Dashboard, Calculadora, Escáner) tiene botón 'PDF' que genera informe ejecutivo con gráficas, proyección tributaria y oportunidades de ahorro citando el Estatuto Tributario.",
+    body: "Usa el botón PDF del módulo para descargar un informe. El reporte OCR incluye partidas extraídas, periodo, unidad, gráfica y alertas aritméticas; el de CalcuTrans incluye el viaje, gastos, caja, carga e indicadores.",
   },
   {
     n: 6,
     title: "Consulta a LEX AI",
-    body: "El chat conoce tu contexto: pregúntale sobre IVA, ReteFuente, Renta, RST, ICA o exógena. Responde con citas al artículo del ET. Es orientativo, no reemplaza al contador titulado.",
+    body: "LEX AI analiza el texto OCR y sus cifras, o responde preguntas sobre IVA, retefuente, renta, RST e ICA. Revisa sus alertas frente al PDF y confirma las normas vigentes: es orientación, no reemplaza al contador.",
   },
 ];
 
@@ -68,11 +70,23 @@ const FAQ = [
   },
   {
     q: "¿Cómo funciona el OCR de facturas?",
-    a: "Sube la imagen, Tesseract extrae el texto en español+inglés, y un parser detecta líneas con valores numéricos. Para mejores resultados: foto nítida, buena iluminación, documento plano.",
+    a: "El Escáner acepta imágenes, PDF, Word, Excel y CSV. Extrae texto y estructura contable de los formatos compatibles. Para mejores resultados usa un archivo legible, completo y sin inclinación. Revisa la pestaña Datos contra el documento antes de usar los indicadores o el análisis.",
+  },
+  {
+    q: "¿Por qué los valores del análisis pueden tener más ceros que los del PDF?",
+    a: "El resumen puede normalizar cifras expresadas en miles o millones a COP para calcular indicadores. La pestaña Datos y la tabla de partidas del PDF conservan el valor como aparece en la fuente y muestran su unidad. Comprueba esa unidad antes de comparar cifras.",
+  },
+  {
+    q: "¿Qué hago si LEX AI no devuelve el análisis?",
+    a: "Comprueba que tu perfil esté cargado, que haya conexión y que el documento contenga texto legible. Vuelve a intentarlo. Si recibes un mensaje de cuota, configuración o servicio, guarda el documento y el error para soporte; el reporte PDF básico puede generarse sin LEX AI.",
+  },
+  {
+    q: "¿Cómo se calculan los indicadores de CalcuTrans?",
+    a: "Ingresos del viaje = flete + recargos; costos = suma de los gastos registrados; utilidad operativa = ingresos - costos; km totales = km cargados + vacíos. El punto de equilibrio descuenta los recargos de los costos. La tarifa objetivo usa el margen elegido. Indicadores por km, tonelada-km y combustible requieren distancias, carga y litros válidos.",
   },
   {
     q: "¿Qué cambia si soy persona natural vs jurídica?",
-    a: "Cambian: las tarifas tributarias en proyecciones (RST 1.8-14.5% vs Renta 35%), las obligaciones del calendario, las deducciones aplicables (Art. 387 ET para naturales, Art. 107 ET para ambas) y el lenguaje de LEX AI.",
+    a: "Cambian el contexto de LEX AI y las obligaciones o estimaciones aplicables. Las tarifas y deducciones dependen del régimen, periodo, base gravable y requisitos vigentes; valida cada resultado con los soportes y un contador.",
   },
   {
     q: "¿Cómo recupero mi contraseña?",
@@ -106,6 +120,17 @@ const SECTIONS = [
     ],
   },
   {
+    icon: TrendingDown,
+    to: "/tax-savings",
+    title: "Ahorro de impuestos",
+    chip: "REVISIÓN ORIENTATIVA",
+    body: [
+      "Revisa oportunidades y conceptos tributarios según el perfil y las cifras registradas o cargadas.",
+      "Abre cada recomendación, identifica sus requisitos y reúne facturas, certificados y soportes antes de aplicarla.",
+      "Las estimaciones no son una liquidación ni garantizan un ahorro; confírmalas según régimen, periodo, municipio y norma vigente con tu contador.",
+    ],
+  },
+  {
     icon: ScanLine,
     to: "/scanner",
     title: "Escáner OCR + LEX AI",
@@ -113,8 +138,22 @@ const SECTIONS = [
     body: [
       "Sube foto de Estado de Situación Financiera, Estado de Resultados (P&L) o facturas.",
       "Tesseract.js extrae texto y reconoce valores numéricos automáticamente.",
-      "Botón 'Analizar con LEX AI': el modelo lee el documento y devuelve oportunidades de ahorro tributario, beneficios aplicables y alertas según tu sector.",
-      "Botón 'PDF' descarga el análisis completo con gráficas, proyecciones y citas al Estatuto Tributario.",
+      "La pestaña Datos conserva importes fuente y comparativos cuando se detectan; verifica la unidad y el periodo antes de interpretar el resumen normalizado a COP.",
+      "El reporte PDF reúne partidas, gráficas y validaciones determinísticas; no reemplaza el documento fuente.",
+      "Analizar con LEX AI agrega observaciones, pero debes contrastar cifras y recomendaciones con el archivo original.",
+    ],
+  },
+  {
+    icon: Truck,
+    to: "/calcutrans",
+    title: "CalcuTrans · Control de viajes",
+    chip: "OPERACIÓN DE TRANSPORTE",
+    body: [
+      "Registra fecha, origen, destino, vehículo, conductor, kilómetros cargados y vacíos, capacidad y combustible.",
+      "Ingresa flete y recargos, recaudos del cliente, retenciones reportadas, anticipos y gastos por categoría; marca si cada gasto salió de caja del conductor.",
+      "Añade líneas de carga con descripción, remesa, bultos, peso, valor declarado y estado de entrega. No reemplaza manifiestos ni documentos legales.",
+      "Consulta ingresos, costos, utilidad y margen del viaje; punto de equilibrio y flete para el margen objetivo; caja del conductor, capacidad, costo/km y combustible.",
+      "Guarda el viaje para el historial, edítalo o expórtalo a PDF desde el formulario o desde su registro. Corrige datos faltantes si la validación lo indica.",
     ],
   },
   {
@@ -274,9 +313,9 @@ function ManualPage() {
           <h2 className="text-lg font-bold">Informes PDF descargables</h2>
         </div>
         <p className="mb-3 text-sm text-muted-foreground">
-          Tres tipos de informe ejecutivo, listos para compartir con tu contador o en juntas directivas:
+          Informes ejecutivos, listos para compartir con tu contador o en juntas directivas:
         </p>
-        <div className="grid gap-2 text-sm sm:grid-cols-3">
+        <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-lg border border-white/10 bg-black/30 p-3">
             <div className="text-xs font-semibold text-neon">Dashboard</div>
             <div className="mt-1 text-[11px] text-muted-foreground">
@@ -292,7 +331,13 @@ function ManualPage() {
           <div className="rounded-lg border border-white/10 bg-black/30 p-3">
             <div className="text-xs font-semibold text-neon">Escáner OCR</div>
             <div className="mt-1 text-[11px] text-muted-foreground">
-              Valores detectados · análisis LEX AI · gráfica composición · ahorro proyectado.
+              Partidas de origen · unidades y periodos · validaciones · gráfica · LEX AI opcional.
+            </div>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/30 p-3">
+            <div className="text-xs font-semibold text-neon">CalcuTrans</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              Control por viaje · gastos y caja · carga · indicadores · descarga PDF.
             </div>
           </div>
         </div>

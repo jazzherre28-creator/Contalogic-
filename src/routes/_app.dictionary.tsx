@@ -18,6 +18,13 @@ type Term = {
   entity_types: string[];
 };
 
+const normalizeSearchText = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("es-CO")
+    .trim();
+
 function DictionaryPage() {
   const { profile } = useAuth();
   const [terms, setTerms] = useState<Term[]>([]);
@@ -38,13 +45,19 @@ function DictionaryPage() {
           setTerms([]);
         } else {
           setLoadError(null);
-          setTerms(
-            (data ?? []).map((row) => ({
+          const uniqueTerms = new Map<string, Term>();
+          for (const row of data ?? []) {
+            const term = {
               ...(row as Term),
               sectors: Array.isArray(row.sectors) ? row.sectors : [],
               entity_types: Array.isArray(row.entity_types) ? row.entity_types : [],
-            })),
-          );
+            };
+            const key = term.term.normalize("NFKC").toLocaleLowerCase("es-CO");
+            const existing = uniqueTerms.get(key);
+            if (!existing || term.definition.length > existing.definition.length)
+              uniqueTerms.set(key, term);
+          }
+          setTerms([...uniqueTerms.values()].sort((a, b) => a.term.localeCompare(b.term, "es-CO")));
         }
         setLoading(false);
       });
@@ -58,20 +71,23 @@ function DictionaryPage() {
       list = list.filter((t) => t.sectors.includes("todos") || t.sectors.includes(sectorFilter));
     }
     if (profile?.entity_type) {
+      const entityType = normalizeSearchText(profile.entity_type);
       list = list.filter(
-        (t) =>
-          t.entity_types.length === 0 ||
-          t.entity_types.includes("todos") ||
-          t.entity_types.includes(profile.entity_type!),
+        (term) =>
+          term.entity_types.length === 0 ||
+          term.entity_types.some((value) => {
+            const normalized = normalizeSearchText(value);
+            return normalized === "todos" || normalized === "ambas" || normalized === entityType;
+          }),
       );
     }
-    const needle = q.trim().toLowerCase();
+    const needle = normalizeSearchText(q);
     if (needle) {
       list = list.filter(
         (t) =>
-          t.term.toLowerCase().includes(needle) ||
-          t.definition.toLowerCase().includes(needle) ||
-          (t.estatuto_article ?? "").toLowerCase().includes(needle),
+          normalizeSearchText(t.term).includes(needle) ||
+          normalizeSearchText(t.definition).includes(needle) ||
+          normalizeSearchText(t.estatuto_article ?? "").includes(needle),
       );
     }
     return list;

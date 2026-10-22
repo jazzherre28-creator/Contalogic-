@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { TaxSavingsPanel } from "@/components/TaxSavingsPanel";
-import { TrendingDown, FileText } from "lucide-react";
+import { TrendingDown, FileText, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/tax-savings")({
   component: TaxSavingsPage,
@@ -21,15 +21,34 @@ function TaxSavingsPage() {
   const { user, profile } = useAuth();
   const [docs, setDocs] = useState<Doc[]>([]);
   const [selectedId, setSelectedId] = useState<string | "general">("general");
+  const [loadingDocs, setLoadingDocs] = useState(true);
+  const [docsError, setDocsError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) return;
-    supabase
-      .from("ocr_documents")
-      .select("id, doc_type, parsed_data, file_name, created_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .then(({ data }) => setDocs((data ?? []) as Doc[]));
+    if (!user) {
+      setLoadingDocs(false);
+      return;
+    }
+    void Promise.resolve()
+      .then(() =>
+        supabase
+          .from("ocr_documents")
+          .select("id, doc_type, parsed_data, file_name, created_at")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false }),
+      )
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("No se pudieron cargar los documentos para ahorro de impuestos", error);
+          setDocsError(
+            "No fue posible cargar tus documentos. Puedes consultar la guía general mientras tanto.",
+          );
+          return;
+        }
+        setDocsError(null);
+        setDocs((data ?? []) as Doc[]);
+      })
+      .finally(() => setLoadingDocs(false));
   }, [user]);
 
   const selected = docs.find((d) => d.id === selectedId);
@@ -46,11 +65,25 @@ function TaxSavingsPage() {
           <div>
             <h1 className="text-lg font-semibold">Ahorro de impuestos</h1>
             <p className="text-sm text-muted-foreground">
-              Estrategias del Estatuto Tributario colombiano basadas en tu perfil y documentos escaneados.
+              Estrategias del Estatuto Tributario colombiano basadas en tu perfil y documentos
+              escaneados.
             </p>
           </div>
         </div>
       </div>
+
+      {loadingDocs && (
+        <div className="glass flex items-center gap-2 p-4 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin text-neon" />
+          Cargando documentos escaneados…
+        </div>
+      )}
+
+      {docsError && (
+        <div role="alert" className="glass border border-amber-500/30 p-4 text-sm text-amber-200">
+          {docsError}
+        </div>
+      )}
 
       {docs.length > 0 && (
         <div className="glass p-4">

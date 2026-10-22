@@ -103,6 +103,8 @@ export function AppHeader() {
           {profile?.sector === "transporte" && (
             <Link
               to="/calcutrans"
+              aria-label="CalcuTrans"
+              title="CalcuTrans"
               className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${
                 loc.pathname === "/calcutrans"
                   ? "bg-[oklch(0.7_0.22_245/0.12)] text-neon shadow-[inset_0_0_0_1px_oklch(0.7_0.22_245/0.45)]"
@@ -110,7 +112,7 @@ export function AppHeader() {
               }`}
             >
               <Truck className="h-4 w-4" />
-              <span>CalcuTrans</span>
+              <span className="hidden sm:inline">CalcuTrans</span>
             </Link>
           )}
 

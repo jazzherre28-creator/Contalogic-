@@ -520,19 +520,28 @@ export function TransportTripCalculator({
           <div>
             <h2 className="text-base font-semibold">Control operativo y financiero de carga</h2>
             <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-              Módulo exclusivo de Transporte. Los viajes y manifiestos se guardan en una tabla
-              propia; no se mezclan con movimientos manuales, análisis OCR ni otros sectores.
+              Registra viajes, controla costos y exporta el resumen de cada operación en PDF.
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => void loadTrips()}
-          disabled={loading}
-          className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-slate-300 transition hover:bg-white/5 disabled:opacity-50"
-        >
-          {loading ? "Actualizando…" : "Actualizar viajes"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => exportTripPdf(trip)}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded-md border border-neon/30 px-3 py-1.5 text-xs font-semibold text-neon transition hover:bg-neon/10 disabled:opacity-50"
+          >
+            <FileDown className="h-3.5 w-3.5" /> Descargar PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => void loadTrips()}
+            disabled={loading}
+            className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-slate-300 transition hover:bg-white/5 disabled:opacity-50"
+          >
+            {loading ? "Actualizando…" : "Actualizar viajes"}
+          </button>
+        </div>
       </header>
 
       <div className="rounded-md border border-amber-400/20 bg-amber-400/[0.04] px-3 py-2 text-[11px] leading-relaxed text-amber-100/80">
@@ -1027,28 +1036,18 @@ export function TransportTripCalculator({
           </div>
         </section>
 
-        <div className="grid gap-2 sm:grid-cols-2">
-          <button
-            type="submit"
-            disabled={saving || loading}
-            className="btn-emerald inline-flex w-full items-center justify-center gap-2 disabled:opacity-50"
-          >
-            <Save className="h-4 w-4" />{" "}
-            {saving
-              ? "Guardando viaje…"
-              : trip.id
-                ? "Actualizar viaje y manifiesto"
-                : "Guardar viaje y manifiesto"}
-          </button>
-          <button
-            type="button"
-            onClick={() => exportTripPdf(trip)}
-            disabled={loading}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-neon/30 px-3 py-2 text-sm text-neon transition hover:bg-neon/10 disabled:opacity-50"
-          >
-            <FileDown className="h-4 w-4" /> Descargar reporte PDF
-          </button>
-        </div>
+        <button
+          type="submit"
+          disabled={saving || loading}
+          className="btn-emerald inline-flex w-full items-center justify-center gap-2 disabled:opacity-50"
+        >
+          <Save className="h-4 w-4" />{" "}
+          {saving
+            ? "Guardando viaje…"
+            : trip.id
+              ? "Actualizar viaje y manifiesto"
+              : "Guardar viaje y manifiesto"}
+        </button>
         {trip.id && (
           <button
             type="button"

@@ -1,11 +1,15 @@
 import type { ReportProfile } from "@/lib/pdf-report";
 import { computeTaxSavings, GENERAL_TAX_TIPS } from "@/lib/tax-savings";
 import { useMemo } from "react";
-import { Sparkles, TrendingDown, BookOpen, ArrowRight } from "lucide-react";
+import { Sparkles, TrendingDown, BookOpen, ArrowRight, ClipboardCheck } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 
 const fmtCOP = (n: number) =>
-  new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(n);
 
 const PRIORITY_STYLE = {
   alta: "border-emerald-500/50 bg-emerald-500/10 text-emerald-300",
@@ -24,7 +28,10 @@ export function TaxSavingsPanel({
   docType?: "balance" | "pnl";
   compact?: boolean;
 }) {
-  const tips = useMemo(() => computeTaxSavings(totals, profile, docType), [totals, profile, docType]);
+  const tips = useMemo(
+    () => computeTaxSavings(totals, profile, docType),
+    [totals, profile, docType],
+  );
   const totalSaving = tips.reduce((s, t) => s + t.potentialSaving, 0);
 
   return (
@@ -39,7 +46,9 @@ export function TaxSavingsPanel({
               Oportunidades a validar
             </div>
             <div className="text-xl font-bold text-slate-100">
-              {totalSaving > 0 ? fmtCOP(totalSaving) : "No cuantificable con solo estados financieros"}
+              {totalSaving > 0
+                ? fmtCOP(totalSaving)
+                : "No cuantificable con solo estados financieros"}
             </div>
           </div>
         </div>
@@ -55,10 +64,7 @@ export function TaxSavingsPanel({
 
       <div className="space-y-3">
         {tips.map((tip) => (
-          <div
-            key={tip.id}
-            className={`rounded-xl border p-4 ${PRIORITY_STYLE[tip.priority]}`}
-          >
+          <div key={tip.id} className={`rounded-xl border p-4 ${PRIORITY_STYLE[tip.priority]}`}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <div className="flex items-center gap-2">
@@ -85,20 +91,56 @@ export function TaxSavingsPanel({
       </div>
 
       {!compact && (
-        <div className="rounded-xl border border-white/10 bg-black/30 p-4">
-          <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-neon">
-            <BookOpen className="h-3.5 w-3.5" />
-            Buenas prácticas tributarias
+        <>
+          <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+            <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-neon">
+              <BookOpen className="h-3.5 w-3.5" />
+              Buenas prácticas tributarias
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {GENERAL_TAX_TIPS.map((t) => (
+                <div key={t.title} className="rounded-lg bg-slate-950/60 p-3">
+                  <div className="text-sm font-semibold text-slate-200">{t.title}</div>
+                  <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{t.text}</p>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {GENERAL_TAX_TIPS.map((t) => (
-              <div key={t.title} className="rounded-lg bg-slate-950/60 p-3">
-                <div className="text-sm font-semibold text-slate-200">{t.title}</div>
-                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{t.text}</p>
-              </div>
-            ))}
+
+          <div className="rounded-xl border border-[oklch(0.7_0.22_245/0.25)] bg-[oklch(0.7_0.22_245/0.05)] p-4">
+            <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-neon">
+              <ClipboardCheck className="h-3.5 w-3.5" />
+              Cómo validar cada oportunidad
+            </div>
+            <ol className="grid gap-3 text-xs leading-relaxed text-muted-foreground sm:grid-cols-2">
+              <li className="rounded-lg bg-slate-950/60 p-3">
+                <strong className="text-slate-200">1. Reúne los soportes.</strong> Facturas y
+                documentos equivalentes válidos cuando correspondan, comprobantes de pago,
+                contratos, extractos y certificados de retención.
+              </li>
+              <li className="rounded-lg bg-slate-950/60 p-3">
+                <strong className="text-slate-200">2. Comprueba la relación.</strong> Identifica el
+                periodo, la actividad que genera la renta y el requisito legal aplicable; separa
+                gastos personales y empresariales.
+              </li>
+              <li className="rounded-lg bg-slate-950/60 p-3">
+                <strong className="text-slate-200">3. Concilia los datos.</strong> Compara
+                contabilidad, bancos, facturación electrónica, declaraciones y certificados. Corrige
+                diferencias antes de declarar.
+              </li>
+              <li className="rounded-lg bg-slate-950/60 p-3">
+                <strong className="text-slate-200">4. Valida antes de aplicar.</strong> Revisa
+                topes, límites, oportunidad, régimen y norma vigente con un contador. Guarda el
+                cálculo y sus soportes.
+              </li>
+            </ol>
+            <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+              Las sugerencias son una guía de revisión, no una liquidación tributaria. Un balance o
+              estado de resultados resumido no permite confirmar por sí solo la procedencia ni el
+              valor de una deducción, descuento o saldo a favor.
+            </p>
           </div>
-        </div>
+        </>
       )}
     </div>
   );

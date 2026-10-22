@@ -3,13 +3,28 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
 import { useFinance } from "@/lib/finance-context";
-import { ScanLine, FileText, Loader2, Trash2, Upload, Sparkles, X, FileDown, FileSpreadsheet, BarChart3 } from "lucide-react";
+import {
+  ScanLine,
+  FileText,
+  Loader2,
+  Trash2,
+  Upload,
+  Sparkles,
+  X,
+  FileDown,
+  FileSpreadsheet,
+  BarChart3,
+} from "lucide-react";
 import { toast } from "sonner";
 import { generateScannerReport } from "@/lib/pdf-report";
 import { extractFromFile } from "@/lib/file-extractors";
-import { ScannerAnalytics, computeAdvancedAnalytics } from "@/components/AdvancedAnalytics";
-import { exportScannerAnalysisXLSX } from "@/lib/excel-report";
+import {
+  ScannerAnalytics,
+  computeAdvancedAnalytics,
+  periodMonthsFromLabel,
+} from "@/components/AdvancedAnalytics";
 import { ComparativeFinancialAnalysis } from "@/components/ComparativeFinancialAnalysis";
+import { exportScannerAnalysisXLSX } from "@/lib/excel-report";
 
 export const Route = createFileRoute("/_app/scanner")({
   component: ScannerPage,
@@ -22,13 +37,16 @@ type Doc = {
   raw_text: string | null;
   parsed_data: {
     totals?: Record<string, number>;
-    lineItems?: Array<{ label: string; value: number }>;
+    lineItems?: Array<{ label: string; value: number; period?: string }>;
+    comparativeLineItems?: Array<{ label: string; value: number; period?: string }>;
     meta?: {
       entryCount?: number;
       charCount?: number;
       source?: string;
       unitLabel?: string;
       unitMultiplier?: number;
+      periodLabel?: string;
+      comparativePeriodLabel?: string;
     };
     sheetSummary?: Array<{ sheet: string; rows: number }>;
   } | null;
@@ -39,19 +57,29 @@ type Doc = {
 function ScannerPage() {
   const { user, profile } = useAuth();
   const { actualizarDesdeOCR } = useFinance();
-  const [progress, setProgress] = useState<{ kind: DocType; pct: number; msg?: string } | null>(null);
+  const [progress, setProgress] = useState<{ kind: DocType; pct: number; msg?: string } | null>(
+    null,
+  );
   const [docs, setDocs] = useState<Doc[]>([]);
   const [analyzing, setAnalyzing] = useState<string | null>(null);
-  const [analysisDoc, setAnalysisDoc] = useState<{ id: string; markdown: string; fileName: string } | null>(null);
+  const [analysisDoc, setAnalysisDoc] = useState<{
+    id: string;
+    markdown: string;
+    fileName: string;
+  } | null>(null);
   const [activeAnalyticsId, setActiveAnalyticsId] = useState<string | null>(null);
 
   const load = async () => {
     if (!user) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("ocr_documents")
       .select("*")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
+    if (error) {
+      toast.error(`No se pudieron cargar los documentos: ${error.message}`);
+      return;
+    }
     setDocs((data ?? []) as Doc[]);
   };
 
@@ -61,7 +89,10 @@ function ScannerPage() {
   }, [user]);
 
   const analyze = async (doc: Doc) => {
-    if (!profile) return;
+    if (!profile) {
+      toast.error("No se puede analizar el documento: no se pudo cargar el perfil.");
+      return;
+    }
     setAnalyzing(doc.id);
     try {
       const { data, error } = await supabase.functions.invoke("lex-ai-analyze", {
@@ -69,6 +100,7 @@ function ScannerPage() {
           rawText: doc.raw_text ?? "",
           totals: doc.parsed_data?.totals ?? {},
           lineItems: doc.parsed_data?.lineItems ?? [],
+          comparativeLineItems: doc.parsed_data?.comparativeLineItems ?? [],
           docType: doc.doc_type,
           entityType: profile.entity_type,
           sector: profile.sector,
@@ -77,9 +109,12 @@ function ScannerPage() {
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
+      if (typeof data?.analysis !== "string" || !data.analysis.trim()) {
+        throw new Error("LEX AI no devolvió un análisis. Intenta de nuevo.");
+      }
       setAnalysisDoc({
         id: doc.id,
-        markdown: data?.analysis ?? "Sin respuesta.",
+        markdown: data.analysis,
         fileName: doc.file_name ?? "Documento",
       });
     } catch (err: unknown) {
@@ -89,28 +124,46 @@ function ScannerPage() {
     }
   };
 
+  const exportPdf = (doc: Doc, analysisMarkdown = "") => {
+    try {
+      generateScannerReport({
+        profile: profile ?? {},
+        fileName: doc.file_name ?? "Documento",
+        docType: doc.doc_type,
+        totals: doc.parsed_data?.totals ?? {},
+        lineItems: doc.parsed_data?.lineItems ?? [],
+        comparativeLineItems: doc.parsed_data?.comparativeLineItems ?? [],
+        meta: doc.parsed_data?.meta,
+        analysisMarkdown,
+      });
+      toast.success("Reporte PDF generado");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "No se pudo generar el reporte PDF");
+    }
+  };
+
   const handleFile = async (file: File, docType: DocType) => {
     if (!user) return;
     setProgress({ kind: docType, pct: 0 });
     try {
       const result = await extractFromFile(file, (pct, msg) =>
-        setProgress({ kind: docType, pct, msg })
+        setProgress({ kind: docType, pct, msg }),
       );
-      const { text, totals, meta, sheetSummary, lineItems } = result;
+      const { text, totals, meta, sheetSummary, lineItems, comparativeLineItems } = result;
       const { error } = await supabase.from("ocr_documents").insert({
         user_id: user.id,
         doc_type: docType,
         raw_text: text,
-        parsed_data: { totals, meta, sheetSummary, lineItems },
+        parsed_data: { totals, meta, sheetSummary, lineItems, comparativeLineItems },
         file_name: file.name,
       });
       if (error) throw error;
-      
+
       // ACTUALIZAR ESTADO GLOBAL CON DATOS DEL OCR
       actualizarDesdeOCR({ totals, lineItems }, docType);
-      
+
       toast.success(
-        `${docType === "balance" ? "Estado de Situación Financiera" : "P&L"} · ${Object.keys(totals).length} partidas · estado global actualizado`
+        `${docType === "balance" ? "Estado de Situación Financiera" : "P&L"} · ${Object.keys(totals).length} partidas · estado global actualizado`,
       );
       load();
     } catch (err: unknown) {
@@ -156,7 +209,8 @@ function ScannerPage() {
         </div>
         {docs.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Aún no hay documentos. Carga una imagen, PDF, Word o Excel de tu Estado de Situación Financiera o P&L.
+            Aún no hay documentos. Carga una imagen, PDF, Word o Excel de tu Estado de Situación
+            Financiera o P&L.
           </p>
         ) : (
           <ul className="space-y-3">
@@ -166,16 +220,15 @@ function ScannerPage() {
               const entryCount = Object.keys(totals).length;
               const isAnalyticsOpen = activeAnalyticsId === d.id;
               return (
-                <li
-                  key={d.id}
-                  className="rounded-lg border border-white/10 bg-white/[0.02] p-3"
-                >
+                <li key={d.id} className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span
                           className={`chip ${
-                            d.doc_type === "balance" ? "chip-neon" : "!text-emerald-glow !border-[oklch(0.92_0.2_105/0.5)]"
+                            d.doc_type === "balance"
+                              ? "chip-neon"
+                              : "!text-emerald-glow !border-[oklch(0.92_0.2_105/0.5)]"
                           }`}
                         >
                           {d.doc_type === "balance" ? "ESTADO S.F." : "P&L"}
@@ -191,6 +244,11 @@ function ScannerPage() {
                             {entryCount} partidas
                           </span>
                         )}
+                        {meta?.unitLabel && (
+                          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-200">
+                            {meta.unitLabel}
+                          </span>
+                        )}
                         {meta?.source && (
                           <span className="rounded bg-white/5 px-1.5 py-0.5">{meta.source}</span>
                         )}
@@ -202,7 +260,18 @@ function ScannerPage() {
                         className="inline-flex items-center gap-1.5 rounded-md border border-[oklch(0.92_0.2_105/0.5)] bg-[oklch(0.92_0.2_105/0.1)] px-2.5 py-1.5 text-xs font-semibold text-emerald-glow transition hover:bg-[oklch(0.92_0.2_105/0.2)]"
                       >
                         <BarChart3 className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">{isAnalyticsOpen ? "Ocultar" : "Consola"}</span>
+                        <span className="hidden sm:inline">
+                          {isAnalyticsOpen ? "Ocultar" : "Consola"}
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => exportPdf(d)}
+                        aria-label={`Descargar reporte PDF de ${d.file_name ?? "documento"}`}
+                        title="Descargar reporte PDF"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-white/15 px-2.5 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/5"
+                      >
+                        <FileDown className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">PDF</span>
                       </button>
                       <button
                         onClick={() => analyze(d)}
@@ -226,7 +295,8 @@ function ScannerPage() {
                   </div>
                   {!isAnalyticsOpen && entryCount > 0 && (
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Abre la consola para ver las {entryCount} partidas extraídas y el análisis completo.
+                      Abre la consola para ver las {entryCount} partidas extraídas y el análisis
+                      completo.
                     </p>
                   )}
                   {isAnalyticsOpen && (
@@ -235,7 +305,9 @@ function ScannerPage() {
                         totals={d.parsed_data?.totals ?? {}}
                         profile={profile ?? {}}
                         docType={d.doc_type}
-                        meta={{ source: "documento" }}
+                        meta={d.parsed_data?.meta}
+                        lineItems={d.parsed_data?.lineItems}
+                        comparativeLineItems={d.parsed_data?.comparativeLineItems}
                       />
                     </div>
                   )}
@@ -274,15 +346,7 @@ function ScannerPage() {
                 <button
                   onClick={() => {
                     const doc = docs.find((x) => x.id === analysisDoc.id);
-                    if (!doc) return;
-                    generateScannerReport({
-                      profile: profile ?? {},
-                      fileName: analysisDoc.fileName,
-                      docType: doc.doc_type,
-                      totals: doc.parsed_data?.totals ?? {},
-                      analysisMarkdown: analysisDoc.markdown,
-                    });
-                    toast.success("Informe PDF generado");
+                    if (doc) exportPdf(doc, analysisDoc.markdown);
                   }}
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[oklch(0.92_0.2_105/0.5)] bg-[oklch(0.92_0.2_105/0.1)] px-2.5 py-1.5 text-xs font-semibold text-emerald-glow transition hover:bg-[oklch(0.92_0.2_105/0.2)]"
                 >
@@ -293,7 +357,11 @@ function ScannerPage() {
                     const doc = docs.find((x) => x.id === analysisDoc.id);
                     if (!doc) return;
                     const totals = doc.parsed_data?.totals ?? {};
-                    const a = computeAdvancedAnalytics(totals, doc.doc_type);
+                    const a = computeAdvancedAnalytics(
+                      totals,
+                      doc.doc_type,
+                      periodMonthsFromLabel(doc.parsed_data?.meta?.periodLabel),
+                    );
                     exportScannerAnalysisXLSX({
                       fileName: analysisDoc.fileName,
                       docType: doc.doc_type,
@@ -320,7 +388,9 @@ function ScannerPage() {
                     totals={doc.parsed_data?.totals ?? {}}
                     profile={profile ?? {}}
                     docType={doc.doc_type}
-                    meta={{ source: "documento" }}
+                    meta={doc.parsed_data?.meta}
+                    lineItems={doc.parsed_data?.lineItems}
+                    comparativeLineItems={doc.parsed_data?.comparativeLineItems}
                   />
                 </div>
               );
@@ -351,21 +421,39 @@ function renderMarkdown(md: string): string {
   for (const raw of lines) {
     const line = raw.trimEnd();
     if (/^### /.test(line)) {
-      if (inList) { html += "</ul>"; inList = false; }
+      if (inList) {
+        html += "</ul>";
+        inList = false;
+      }
       html += `<h3>${formatInline(escape(line.slice(4)))}</h3>`;
     } else if (/^## /.test(line)) {
-      if (inList) { html += "</ul>"; inList = false; }
+      if (inList) {
+        html += "</ul>";
+        inList = false;
+      }
       html += `<h2>${formatInline(escape(line.slice(3)))}</h2>`;
     } else if (/^# /.test(line)) {
-      if (inList) { html += "</ul>"; inList = false; }
+      if (inList) {
+        html += "</ul>";
+        inList = false;
+      }
       html += `<h1>${formatInline(escape(line.slice(2)))}</h1>`;
     } else if (/^[-*]\s+/.test(line)) {
-      if (!inList) { html += "<ul>"; inList = true; }
+      if (!inList) {
+        html += "<ul>";
+        inList = true;
+      }
       html += `<li>${formatInline(escape(line.replace(/^[-*]\s+/, "")))}</li>`;
     } else if (line.trim() === "") {
-      if (inList) { html += "</ul>"; inList = false; }
+      if (inList) {
+        html += "</ul>";
+        inList = false;
+      }
     } else {
-      if (inList) { html += "</ul>"; inList = false; }
+      if (inList) {
+        html += "</ul>";
+        inList = false;
+      }
       html += `<p>${formatInline(escape(line))}</p>`;
     }
   }
@@ -398,12 +486,13 @@ function UploadCard({
   const isNeon = accent === "neon";
   return (
     <label
-      className={`relative block cursor-pointer p-5 transition ${
-        isNeon ? "glass-neon" : "glass"
-      }`}
+      className={`relative block cursor-pointer p-5 transition ${isNeon ? "glass-neon" : "glass"}`}
       style={
         !isNeon
-          ? { boxShadow: "var(--shadow-emerald), var(--shadow-glass)", borderColor: "oklch(0.92 0.2 105 / 0.4)" }
+          ? {
+              boxShadow: "var(--shadow-emerald), var(--shadow-glass)",
+              borderColor: "oklch(0.92 0.2 105 / 0.4)",
+            }
           : undefined
       }
     >

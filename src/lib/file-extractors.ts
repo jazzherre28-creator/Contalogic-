@@ -1,12 +1,13 @@
 // Multi-format text/data extractors (browser-only, dynamic imports)
 import { cleanNumericValue } from "./global-finance-state";
 
-export type LineItem = { label: string; value: number };
+export type LineItem = { label: string; value: number; period?: string };
 
 export type ExtractResult = {
   text: string;
   totals: Record<string, number>;
   lineItems: LineItem[];
+  comparativeLineItems?: LineItem[];
   pages?: number;
   sheetSummary?: Array<{ sheet: string; rows: number }>;
   meta?: {
@@ -15,10 +16,13 @@ export type ExtractResult = {
     source: string;
     unitLabel?: string;
     unitMultiplier?: number;
+    periodLabel?: string;
+    comparativePeriodLabel?: string;
   };
 };
 
-const AMOUNT_RE = /[-(]?\$?\s?[\d]{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{1,2})?\)?|[-(]?\$?\s?[\d]+(?:[.,]\d+)?\)?/g;
+const AMOUNT_RE =
+  /[-(]?\$?\s?[\d]{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{1,2})?\)?|[-(]?\$?\s?[\d]+(?:[.,]\d+)?\)?/g;
 
 const FINANCIAL_HINT =
   /ingres|gasto|costo|activ|pasiv|patrim|utilidad|total|subtotal|iva|renta|saldo|cuenta|debe|haber|caja|banco|mercanc|proveed|nomina|arrend|amort|deprec|invent|flujo|\$|cop/i;
@@ -36,7 +40,10 @@ function normalizeNumber(numRaw: string): string | null {
 }
 
 function uniqueLabel(base: string, used: Map<string, number>): string {
-  const clean = base.trim().replace(/\s{2,}/g, " ").slice(0, 80);
+  const clean = base
+    .trim()
+    .replace(/\s{2,}/g, " ")
+    .slice(0, 80);
   if (!clean) return "";
   const count = used.get(clean) ?? 0;
   used.set(clean, count + 1);
@@ -96,7 +103,9 @@ function extractFromLine(line: string, used: Map<string, number>): LineItem[] {
   const items: LineItem[] = [];
 
   // Pair label: value / label = value
-  const keyValueMatches = [...trimmed.matchAll(/([A-Za-zÁÉÍÓÚÑáéíóúñ/&().\-\s]{2,80}?)\s*[:=]\s*([-+]?\$?\s?[\d.,]+)/g)];
+  const keyValueMatches = [
+    ...trimmed.matchAll(/([A-Za-zÁÉÍÓÚÑáéíóúñ/&().\-\s]{2,80}?)\s*[:=]\s*([-+]?\$?\s?[\d.,]+)/g),
+  ];
   if (keyValueMatches.length > 0) {
     for (const match of keyValueMatches) {
       const valueStr = normalizeNumber(match[2]);
@@ -111,7 +120,10 @@ function extractFromLine(line: string, used: Map<string, number>): LineItem[] {
   }
 
   // Tabular: label ; value
-  const semiParts = trimmed.split(";").map((p) => p.trim()).filter(Boolean);
+  const semiParts = trimmed
+    .split(";")
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (semiParts.length >= 2) {
     const lastPart = semiParts[semiParts.length - 1];
     const lastMatch = lastPart.match(AMOUNT_RE);
@@ -130,7 +142,10 @@ function extractFromLine(line: string, used: Map<string, number>): LineItem[] {
   }
 
   // Tabular: label | value or label\tvalue
-  const parts = trimmed.split(/\t|\|/).map((p) => p.trim()).filter(Boolean);
+  const parts = trimmed
+    .split(/\t|\|/)
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (parts.length >= 2) {
     const lastPart = parts[parts.length - 1];
     const lastMatch = lastPart.match(AMOUNT_RE);
@@ -201,7 +216,26 @@ export function parseLineItems(text: string): LineItem[] {
     if (!valueStr) continue;
     const value = parseFloat(valueStr);
     if (isNaN(value) || Math.abs(value) < 1) continue;
-    const label = uniqueLabel(m[1].trim(), used);
+    const labelBase = m[1]
+      .trim()
+      .replace(/[:=]+$/g, "")
+      .trim();
+    const comparableLabel = labelBase
+      .toLocaleLowerCase("es-CO")
+      .replace(/[^\p{L}\p{N}\s]/gu, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const alreadyExtracted = items.some((item) => {
+      const existingLabel = item.label
+        .replace(/\s+\(\d+\)$/, "")
+        .toLocaleLowerCase("es-CO")
+        .replace(/[^\p{L}\p{N}\s]/gu, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return existingLabel === comparableLabel && item.value === value;
+    });
+    if (alreadyExtracted) continue;
+    const label = uniqueLabel(labelBase, used);
     if (label.length > 0) items.push({ label, value });
   }
 
@@ -244,7 +278,7 @@ function mergeUniqueLineItems(...batches: LineItem[][]): LineItem[] {
   const merged: LineItem[] = [];
   for (const batch of batches) {
     for (const item of batch) {
-      const key = `${item.label.trim().toLowerCase()}|${item.value}`;
+      const key = `${item.label.trim().toLowerCase()}|${item.period ?? ""}|${item.value}`;
       if (seen.has(key)) continue;
       seen.add(key);
       merged.push(item);
@@ -285,32 +319,38 @@ function buildResult(
   text: string,
   extra: Partial<ExtractResult> = {},
   extraItems: LineItem[] = [],
-  options: { structuredOnly?: boolean; unitMultiplier?: number; unitLabel?: string } = {}
+  options: {
+    structuredOnly?: boolean;
+    unitMultiplier?: number;
+    unitLabel?: string;
+    comparativeItems?: LineItem[];
+  } = {},
 ): ExtractResult {
   const parsed = options.structuredOnly ? [] : parseLineItems(text);
-  const lineItems = mergeUniqueLineItems(parsed, extraItems).map((item) => ({
-    ...item,
-    value: item.value * (options.unitMultiplier ?? 1),
-  }));
-  const totals = lineItemsToTotals(lineItems);
+  const lineItems = mergeUniqueLineItems(parsed, extraItems);
+  const comparativeLineItems = mergeUniqueLineItems(options.comparativeItems ?? []);
+  const unitMultiplier = options.unitMultiplier ?? 1;
+  const totals = lineItemsToTotals(
+    lineItems.map((item) => ({ ...item, value: item.value * unitMultiplier })),
+  );
+  const meta = {
+    ...extra.meta,
+    entryCount: Object.keys(totals).length,
+    charCount: text.length,
+    source: extra.meta?.source ?? "text",
+    ...(unitMultiplier !== 1 ? { unitLabel: options.unitLabel, unitMultiplier } : {}),
+  };
   return {
     ...extra,
     text,
     totals,
     lineItems,
-    meta: {
-      ...extra.meta,
-      entryCount: Object.keys(totals).length,
-      charCount: text.length,
-      source: extra.meta?.source ?? "text",
-      ...(options.unitMultiplier && options.unitMultiplier !== 1
-        ? { unitLabel: options.unitLabel, unitMultiplier: options.unitMultiplier }
-        : {}),
-    },
+    ...(comparativeLineItems.length > 0 ? { comparativeLineItems } : {}),
+    meta,
   };
 }
 
-type PdfTextRow = { text: string; cells: Array<{ text: string; x: number }> };
+type PdfTextRow = { text: string; y: number; cells: Array<{ text: string; x: number }> };
 
 function getPdfTextRows(items: Array<{ str?: string; transform?: number[] }>): PdfTextRow[] {
   const rows: Array<{ y: number; cells: Array<{ text: string; x: number }> }> = [];
@@ -329,51 +369,103 @@ function getPdfTextRows(items: Array<{ str?: string; transform?: number[] }>): P
 
   return rows
     .sort((a, b) => b.y - a.y)
-    .map(({ cells }) => {
+    .map(({ cells, y }) => {
       const sortedCells = cells.sort((a, b) => a.x - b.x);
       return {
         cells: sortedCells,
         text: sortedCells.map((cell) => cell.text).join("\t"),
+        y,
       };
     });
 }
 
-function parsePdfFinancialRows(rows: PdfTextRow[]): LineItem[] {
-  const items: LineItem[] = [];
-  for (const row of rows) {
+type ParsedPdfFinancialRows = {
+  lineItems: LineItem[];
+  comparativeLineItems: LineItem[];
+  periodLabel?: string;
+  comparativePeriodLabel?: string;
+};
+
+function periodForColumn(rows: PdfTextRow[], rowIndex: number, x: number) {
+  const rowY = rows[rowIndex].y;
+  for (let i = rowIndex - 1; i >= 0; i--) {
+    if (rows[i].y - rowY > 300) break;
+    const headers = rows[i].cells.filter(
+      (cell) =>
+        cell.x >= 250 &&
+        /\b(?:19|20)\d{2}\b/.test(cell.text) &&
+        (!/^\d[\d.,\s]*$/.test(cell.text) || /^(?:19|20)\d{2}$/.test(cell.text.trim())) &&
+        !cell.text.includes("%"),
+    );
+    if (headers.length > 0) {
+      return headers.sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0].text;
+    }
+  }
+  return undefined;
+}
+
+function parsePdfFinancialRows(rows: PdfTextRow[]): ParsedPdfFinancialRows {
+  const lineItems: LineItem[] = [];
+  const comparativeLineItems: LineItem[] = [];
+  let periodLabel: string | undefined;
+  let comparativePeriodLabel: string | undefined;
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    const row = rows[rowIndex];
     const amountCells = row.cells.filter(
-      ({ text, x }) => x >= 250 && !text.includes("%") && /^[-+]?\(?\$?\s*\d[\d.,\s]*\)?$/.test(text)
+      ({ text, x }) =>
+        x >= 250 && !text.includes("%") && /^[-+]?\(?\$?\s*\d[\d.,\s]*\)?$/.test(text),
     );
     if (amountCells.length === 0) continue;
     const firstAmount = amountCells[0];
     const label = row.cells
-      .filter((cell) => cell.x < Math.min(firstAmount.x, 250) && !/^[-+]?\(?\$?\s*\d[\d.,\s]*\)?$/.test(cell.text))
+      .filter(
+        (cell) =>
+          cell.x < Math.min(firstAmount.x, 250) &&
+          !/^[-+]?\(?\$?\s*\d[\d.,\s]*\)?$/.test(cell.text),
+      )
       .map((cell) => cell.text)
       .join(" ")
       .replace(/\s{2,}/g, " ")
       .trim();
     if (!label || label.length < 3) continue;
 
-    const value = cleanNumericValue(firstAmount.text);
-    if (!Number.isFinite(value)) continue;
-    items.push({ label, value });
+    for (const [columnIndex, amount] of amountCells.entries()) {
+      const value = cleanNumericValue(amount.text);
+      if (!Number.isFinite(value)) continue;
+      const period = periodForColumn(rows, rowIndex, amount.x);
+      if (columnIndex === 0) {
+        periodLabel ??= period;
+        lineItems.push({ label, value });
+      } else {
+        comparativePeriodLabel ??= period;
+        comparativeLineItems.push({
+          label,
+          value,
+          period: period ?? `Columna comparativa ${columnIndex + 1}`,
+        });
+      }
+    }
   }
-  return items;
+  return { lineItems, comparativeLineItems, periodLabel, comparativePeriodLabel };
 }
 
 export function parsePdfFinancialItems(
-  items: Array<{ str?: string; transform?: number[] }>
+  items: Array<{ str?: string; transform?: number[] }>,
 ): LineItem[] {
-  return parsePdfFinancialRows(
-    getPdfTextRows(items)
-  );
+  return parsePdfFinancialRows(getPdfTextRows(items)).lineItems;
+}
+
+export function parsePdfFinancialComparativeItems(
+  items: Array<{ str?: string; transform?: number[] }>,
+): LineItem[] {
+  return parsePdfFinancialRows(getPdfTextRows(items)).comparativeLineItems;
 }
 
 async function ocrPdfPages(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pdf: any,
   onProgress?: ProgressFn,
-  startPct = 85
+  startPct = 85,
 ): Promise<string> {
   const Tesseract = (await import("tesseract.js")).default;
   let ocrText = "";
@@ -388,7 +480,10 @@ async function ocrPdfPages(
     await page.render({ canvasContext: ctx, viewport, canvas }).promise;
     const { data } = await Tesseract.recognize(canvas, "spa+eng");
     ocrText += `\n--- Página ${i} ---\n${data.text ?? ""}\n`;
-    onProgress?.(Math.round(startPct + (i / pdf.numPages) * (100 - startPct)), `OCR página ${i}/${pdf.numPages}`);
+    onProgress?.(
+      Math.round(startPct + (i / pdf.numPages) * (100 - startPct)),
+      `OCR página ${i}/${pdf.numPages}`,
+    );
   }
   return ocrText;
 }
@@ -406,7 +501,11 @@ export async function extractFromFile(file: File, onProgress?: ProgressFn): Prom
   if (ext === "docx" || mime.includes("wordprocessingml")) {
     return await extractDocx(file, onProgress);
   }
-  if (["xlsx", "xls", "csv"].includes(ext) || mime.includes("spreadsheet") || mime.includes("excel")) {
+  if (
+    ["xlsx", "xls", "csv"].includes(ext) ||
+    mime.includes("spreadsheet") ||
+    mime.includes("excel")
+  ) {
     return await extractExcel(file, onProgress);
   }
   throw new Error(`Formato no soportado: .${ext}`);
@@ -416,7 +515,8 @@ async function extractImage(file: File, onProgress?: ProgressFn): Promise<Extrac
   const Tesseract = (await import("tesseract.js")).default;
   const { data } = await Tesseract.recognize(file, "spa+eng", {
     logger: (m: { status: string; progress: number }) => {
-      if (m.status === "recognizing text") onProgress?.(Math.round(m.progress * 100), "OCR imagen · análisis completo");
+      if (m.status === "recognizing text")
+        onProgress?.(Math.round(m.progress * 100), "OCR imagen · análisis completo");
     },
   });
   const text = data.text ?? "";
@@ -433,16 +533,19 @@ async function extractPdf(file: File, onProgress?: ProgressFn): Promise<ExtractR
   const pdf = await pdfjs.getDocument({ data: buf }).promise;
   let text = "";
   const structuredItems: LineItem[] = [];
+  const comparativeItems: LineItem[] = [];
+  let periodLabel: string | undefined;
+  let comparativePeriodLabel: string | undefined;
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const rows = getPdfTextRows(
-      content.items as Array<{ str?: string; transform?: number[] }>
-    );
+    const rows = getPdfTextRows(content.items as Array<{ str?: string; transform?: number[] }>);
+    const parsedRows = parsePdfFinancialRows(rows);
     text += `${rows.map((row) => row.text).join("\n")}\n`;
-    structuredItems.push(
-      ...parsePdfFinancialRows(rows)
-    );
+    structuredItems.push(...parsedRows.lineItems);
+    comparativeItems.push(...parsedRows.comparativeLineItems);
+    periodLabel ??= parsedRows.periodLabel;
+    comparativePeriodLabel ??= parsedRows.comparativePeriodLabel;
     onProgress?.(Math.round((i / pdf.numPages) * 80), `Página ${i}/${pdf.numPages}`);
   }
 
@@ -466,19 +569,28 @@ async function extractPdf(file: File, onProgress?: ProgressFn): Promise<ExtractR
     }
   }
 
-  const hasThousandsOfCOP =
-    /\b(miles?\s+de\s+pesos|miles?\s+cop|cifras?\s+en\s+miles)\b/i.test(combinedText);
+  const hasThousandsOfCOP = /\b(miles?\s+de\s+pesos|miles?\s+cop|cifras?\s+en\s+miles)\b/i.test(
+    combinedText,
+  );
   onProgress?.(100, "Listo");
-  return buildResult(combinedText, {
-    pages: pdf.numPages,
-    meta: {
-      source: isScanned ? "ocr-pdf" : usedOcr ? "pdf-hybrid" : "pdf-text",
+  return buildResult(
+    combinedText,
+    {
+      pages: pdf.numPages,
+      meta: {
+        source: isScanned ? "ocr-pdf" : usedOcr ? "pdf-hybrid" : "pdf-text",
+        ...(periodLabel ? { periodLabel } : {}),
+        ...(comparativePeriodLabel ? { comparativePeriodLabel } : {}),
+      },
     },
-  }, extractedItems, {
-    structuredOnly: extractedItems.length >= 8,
-    unitMultiplier: hasThousandsOfCOP ? 1000 : 1,
-    unitLabel: hasThousandsOfCOP ? "COP (fuente expresada en miles de pesos)" : undefined,
-  });
+    extractedItems,
+    {
+      structuredOnly: extractedItems.length >= 8,
+      unitMultiplier: hasThousandsOfCOP ? 1000 : 1,
+      unitLabel: hasThousandsOfCOP ? "Miles de COP (cifra como aparece en el PDF)" : undefined,
+      comparativeItems,
+    },
+  );
 }
 
 async function extractDocx(file: File, onProgress?: ProgressFn): Promise<ExtractResult> {
@@ -542,14 +654,12 @@ async function extractExcel(file: File, onProgress?: ProgressFn): Promise<Extrac
   });
 
   onProgress?.(100, "Listo");
-  const parsedItems = parseLineItems(text);
-  const merged = [...directItems, ...parsedItems];
-  const totals = lineItemsToTotals(merged);
+  const totals = lineItemsToTotals(directItems);
 
   return {
     text,
     totals,
-    lineItems: merged,
+    lineItems: directItems,
     sheetSummary,
     meta: {
       entryCount: Object.keys(totals).length,

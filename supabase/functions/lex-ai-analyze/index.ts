@@ -11,16 +11,8 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const {
-      rawText,
-      totals,
-      lineItems,
-      comparativeLineItems,
-      docType,
-      entityType,
-      sector,
-      meta,
-    } = await req.json();
+    const { rawText, totals, lineItems, comparativeLineItems, docType, entityType, sector, meta } =
+      await req.json();
     const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
     if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY no configurada");
 

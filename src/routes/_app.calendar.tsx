@@ -2,7 +2,16 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-context";
-import { CalendarDays, BellRing, BellOff, Filter, AlertTriangle, CheckCircle2, BookOpen, Loader2 } from "lucide-react";
+import {
+  CalendarDays,
+  BellRing,
+  Filter,
+  AlertTriangle,
+  CheckCircle2,
+  BookOpen,
+  Loader2,
+  ExternalLink,
+} from "lucide-react";
 import { toast } from "sonner";
 import { SECTOR_LABEL, ENTITY_LABEL } from "@/lib/sectors";
 
@@ -18,6 +27,7 @@ type Deadline = {
   period: string;
   due_date: string;
   nit_last_digit: number | null;
+  nit_group: string | null;
   description: string | null;
   estatuto_article: string | null;
 };
@@ -36,16 +46,25 @@ function CalendarPage() {
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [filterMine, setFilterMine] = useState(true);
 
   const load = async () => {
     setLoading(true);
-    const [{ data: dls }, { data: rems }] = await Promise.all([
-      supabase.from("tax_deadlines").select("*").order("due_date", { ascending: true }),
-      user
-        ? supabase.from("user_reminders").select("id, deadline_id, status").eq("user_id", user.id)
-        : Promise.resolve({ data: [] as Reminder[] }),
-    ]);
+    const [{ data: dls, error: deadlinesError }, { data: rems, error: remindersError }] =
+      await Promise.all([
+        supabase.from("tax_deadlines").select("*").order("due_date", { ascending: true }),
+        user
+          ? supabase.from("user_reminders").select("id, deadline_id, status").eq("user_id", user.id)
+          : Promise.resolve({ data: [] as Reminder[], error: null }),
+      ]);
+    if (deadlinesError || remindersError) {
+      const error = deadlinesError ?? remindersError;
+      console.error("No se pudo cargar el calendario tributario", error);
+      setLoadError("No fue posible cargar los vencimientos. Intenta nuevamente.");
+    } else {
+      setLoadError(null);
+    }
     setDeadlines((dls ?? []) as Deadline[]);
     setReminders((rems ?? []) as Reminder[]);
     setLoading(false);
@@ -109,23 +128,52 @@ function CalendarPage() {
               Filtrado por {profile && ENTITY_LABEL[profile.entity_type ?? "natural"]} ·{" "}
               {profile && SECTOR_LABEL[profile.sector ?? "transporte"]}
               {profile?.nit_last_digit !== null && profile?.nit_last_digit !== undefined && (
-                <> · NIT terminado en <span className="text-neon font-mono">{profile.nit_last_digit}</span></>
+                <>
+                  {" "}
+                  · NIT terminado en{" "}
+                  <span className="text-neon font-mono">{profile.nit_last_digit}</span>
+                </>
               )}
             </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Para renta de personas naturales, verifica los dos últimos dígitos del NIT y el grupo
+              indicado en cada vencimiento. Fechas tomadas del calendario oficial DIAN 2026.
+            </p>
           </div>
-          <button
-            onClick={() => setFilterMine((v) => !v)}
-            className={`btn-neon ${!filterMine ? "!bg-transparent !text-muted-foreground" : ""}`}
-          >
-            <Filter className="h-4 w-4" />
-            {filterMine ? "Filtrado: Mi perfil" : "Mostrar todos"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href="https://www.dian.gov.co/Calendarios/Calendario_Tributario_2026.pdf"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-white/10 px-3 py-2 text-xs text-muted-foreground transition hover:border-neon/40 hover:text-neon"
+            >
+              Fuente DIAN <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+            <button
+              onClick={() => setFilterMine((v) => !v)}
+              className={`btn-neon ${!filterMine ? "!bg-transparent !text-muted-foreground" : ""}`}
+            >
+              <Filter className="h-4 w-4" />
+              {filterMine ? "Filtrado: Mi perfil" : "Mostrar todos"}
+            </button>
+          </div>
         </div>
       </div>
 
       {loading ? (
         <div className="glass grid place-items-center py-20">
           <Loader2 className="h-6 w-6 animate-spin text-neon" />
+        </div>
+      ) : loadError ? (
+        <div role="alert" className="glass px-5 py-8 text-center text-sm text-destructive">
+          <p>{loadError}</p>
+          <button onClick={load} className="mt-3 underline underline-offset-4">
+            Reintentar
+          </button>
+        </div>
+      ) : deadlines.length === 0 ? (
+        <div className="glass px-5 py-8 text-center text-sm text-muted-foreground">
+          No hay vencimientos cargados. Consulta el calendario oficial DIAN enlazado arriba.
         </div>
       ) : (
         <>
@@ -142,7 +190,11 @@ function CalendarPage() {
             </Section>
           )}
 
-          <Section title={`Próximos vencimientos (${upcoming.length})`} icon={CalendarDays} accent="neon">
+          <Section
+            title={`Próximos vencimientos (${upcoming.length})`}
+            icon={CalendarDays}
+            accent="neon"
+          >
             {upcoming.length === 0 ? (
               <div className="px-4 py-6 text-sm text-muted-foreground">
                 No hay vencimientos próximos para tu perfil. Cambia el filtro para ver todos.
@@ -212,10 +264,9 @@ function DeadlineRow({
           {d.nit_last_digit !== null && (
             <span className="chip chip-neon font-mono">NIT •{d.nit_last_digit}</span>
           )}
+          {d.nit_group && <span className="chip chip-neon font-mono">NIT {d.nit_group}</span>}
         </div>
-        {d.description && (
-          <p className="mt-1 text-xs text-muted-foreground">{d.description}</p>
-        )}
+        {d.description && <p className="mt-1 text-xs text-muted-foreground">{d.description}</p>}
         {d.estatuto_article && (
           <div className="mt-1 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-emerald-glow">
             <BookOpen className="h-3 w-3" /> {d.estatuto_article}
@@ -233,11 +284,7 @@ function DeadlineRow({
           </div>
           <div
             className={`font-mono text-[10px] uppercase tracking-widest ${
-              overdue
-                ? "text-destructive"
-                : urgent
-                  ? "text-emerald-glow"
-                  : "text-muted-foreground"
+              overdue ? "text-destructive" : urgent ? "text-emerald-glow" : "text-muted-foreground"
             }`}
           >
             {overdue ? `Vencido hace ${Math.abs(days)} días` : `En ${days} días`}

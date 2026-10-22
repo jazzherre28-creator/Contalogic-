@@ -53,6 +53,8 @@ const fmt = (n: number) =>
     maximumFractionDigits: 0,
   }).format(n);
 
+const SUPPORT_EMAIL = "jazzherre28@gmail.com";
+
 function AdminConsole() {
   const { user: me } = useAuth();
   const { isSuperAdmin, loading: rolesLoading } = useRoles();
@@ -62,9 +64,7 @@ function AdminConsole() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState("");
-  const [filter, setFilter] = useState<"all" | "admins" | "onboarded" | "pending">(
-    "all",
-  );
+  const [filter, setFilter] = useState<"all" | "admins" | "onboarded" | "pending">("all");
   const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
@@ -119,6 +119,15 @@ function AdminConsole() {
   };
 
   const revoke = async (userId: string, role: "admin" | "super_admin") => {
+    if (
+      users
+        .find((adminUser) => adminUser.id === userId)
+        ?.email?.trim()
+        .toLowerCase() === SUPPORT_EMAIL
+    ) {
+      toast.error("La cuenta de soporte está protegida y no puede perder sus roles.");
+      return;
+    }
     setBusy(userId + role);
     try {
       await callAdmin({ action: "revoke_role", user_id: userId, role });
@@ -134,11 +143,11 @@ function AdminConsole() {
   };
 
   const remove = async (u: AdminUser) => {
-    if (
-      !confirm(
-        `¿Eliminar permanentemente a ${u.email}? Esta acción borra TODOS sus datos.`,
-      )
-    )
+    if (u.email?.trim().toLowerCase() === SUPPORT_EMAIL) {
+      toast.error("La cuenta de soporte está protegida y no se puede eliminar.");
+      return;
+    }
+    if (!confirm(`¿Eliminar permanentemente a ${u.email}? Esta acción borra TODOS sus datos.`))
       return;
     setBusy(u.id + "del");
     try {
@@ -160,8 +169,7 @@ function AdminConsole() {
         const hay = `${u.email ?? ""} ${u.profile?.display_name ?? ""}`.toLowerCase();
         if (!hay.includes(q.toLowerCase())) return false;
       }
-      if (filter === "admins")
-        return u.roles.some((r) => r === "admin" || r === "super_admin");
+      if (filter === "admins") return u.roles.some((r) => r === "admin" || r === "super_admin");
       if (filter === "onboarded") return u.profile?.onboarded;
       if (filter === "pending") return !u.profile?.onboarded;
       return true;
@@ -241,8 +249,8 @@ function AdminConsole() {
               </div>
             </div>
             <p className="mt-2 max-w-2xl text-xs text-muted-foreground">
-              Visualiza todos los terminales, gestiona roles, audita la
-              actividad financiera global y controla el acceso al sistema.
+              Visualiza todos los terminales, gestiona roles, audita la actividad financiera global
+              y controla el acceso al sistema.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 self-start">
@@ -319,9 +327,7 @@ function AdminConsole() {
           icon={<Sparkles className="h-5 w-5" />}
           label="Margen neto"
           value={fmt(stats.totalIncome - stats.totalExpense)}
-          tone={
-            stats.totalIncome - stats.totalExpense >= 0 ? "emerald" : "neon"
-          }
+          tone={stats.totalIncome - stats.totalExpense >= 0 ? "emerald" : "neon"}
           wide
         />
       </div>
@@ -377,6 +383,7 @@ function AdminConsole() {
               key={u.id}
               u={u}
               isMe={u.id === me?.id}
+              isSupport={u.email?.trim().toLowerCase() === SUPPORT_EMAIL}
               busy={busy}
               onGrant={grant}
               onRevoke={revoke}
@@ -408,9 +415,7 @@ function StatCard({
     >
       <div
         className={`absolute -right-6 -top-6 h-24 w-24 rounded-full opacity-25 blur-2xl ${
-          tone === "emerald"
-            ? "bg-[var(--gradient-emerald)]"
-            : "bg-[var(--gradient-neon)]"
+          tone === "emerald" ? "bg-[var(--gradient-emerald)]" : "bg-[var(--gradient-neon)]"
         }`}
       />
       <div className="relative flex items-start justify-between">
@@ -441,6 +446,7 @@ function StatCard({
 function UserCard({
   u,
   isMe,
+  isSupport,
   busy,
   onGrant,
   onRevoke,
@@ -448,6 +454,7 @@ function UserCard({
 }: {
   u: AdminUser;
   isMe: boolean;
+  isSupport: boolean;
   busy: string | null;
   onGrant: (id: string, role: "admin" | "super_admin") => void;
   onRevoke: (id: string, role: "admin" | "super_admin") => void;
@@ -455,10 +462,7 @@ function UserCard({
 }) {
   const isSuper = u.roles.includes("super_admin");
   const isAdmin = u.roles.includes("admin");
-  const initials =
-    (u.profile?.display_name ?? u.email ?? "?")
-      .slice(0, 2)
-      .toUpperCase();
+  const initials = (u.profile?.display_name ?? u.email ?? "?").slice(0, 2).toUpperCase();
 
   return (
     <div
@@ -490,13 +494,14 @@ function UserCard({
               <div className="truncate text-sm font-semibold">
                 {u.profile?.display_name || u.email}
               </div>
-              {isMe && (
-                <span className="chip chip-neon !py-0.5 !text-[9px]">YO</span>
+              {isMe && <span className="chip chip-neon !py-0.5 !text-[9px]">YO</span>}
+              {isSupport && (
+                <span className="chip !border-emerald-glow/50 !text-emerald-glow !py-0.5 !text-[9px]">
+                  SOPORTE PROTEGIDO
+                </span>
               )}
             </div>
-            <div className="truncate font-mono text-[11px] text-muted-foreground">
-              {u.email}
-            </div>
+            <div className="truncate font-mono text-[11px] text-muted-foreground">{u.email}</div>
             <div className="mt-1.5 flex flex-wrap gap-1">
               {isSuper && (
                 <span className="chip !border-emerald-glow/50 !bg-[oklch(0.92_0.2_105/0.12)] !text-emerald-glow !py-0.5 !text-[9px]">
@@ -504,15 +509,13 @@ function UserCard({
                   SUPER
                 </span>
               )}
-              {isAdmin && !isSuper && (
+              {!isSupport && isAdmin && !isSuper && (
                 <span className="chip !border-neon/50 !text-neon !py-0.5 !text-[9px]">
                   <Shield className="h-2.5 w-2.5" />
                   ADMIN
                 </span>
               )}
-              {!isAdmin && !isSuper && (
-                <span className="chip !py-0.5 !text-[9px]">USER</span>
-              )}
+              {!isAdmin && !isSuper && <span className="chip !py-0.5 !text-[9px]">USER</span>}
               {u.profile?.entity_type && (
                 <span className="chip !py-0.5 !text-[9px]">
                   {ENTITY_LABEL[u.profile.entity_type as "natural" | "juridica"]}
@@ -520,13 +523,11 @@ function UserCard({
               )}
               {u.profile?.sector && (
                 <span className="chip !py-0.5 !text-[9px]">
-                  {SECTOR_LABEL[
-                    u.profile.sector as
-                      | "transporte"
-                      | "comercio"
-                      | "servicios"
-                      | "manufactura"
-                  ]}
+                  {
+                    SECTOR_LABEL[
+                      u.profile.sector as "transporte" | "comercio" | "servicios" | "manufactura"
+                    ]
+                  }
                 </span>
               )}
               {!u.profile?.onboarded && (
@@ -586,7 +587,7 @@ function UserCard({
             Promover a SUPER
           </button>
         )}
-        {isSuper && !isMe && (
+        {!isSupport && isSuper && !isMe && (
           <button
             disabled={busy === u.id + "super_admin"}
             onClick={() => onRevoke(u.id, "super_admin")}
@@ -596,7 +597,7 @@ function UserCard({
             Degradar SUPER
           </button>
         )}
-        {!isMe && (
+        {!isMe && !isSupport && (
           <button
             disabled={busy === u.id + "del"}
             onClick={() => onDelete(u)}

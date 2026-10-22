@@ -80,22 +80,17 @@
   --grid: oklch(0.7 0.22 245 / 0.07);
 
   /* Gradientes y sombras */
-  --gradient-bg: radial-gradient(
-      ellipse at top,
-      oklch(0.22 0.1 245 / 0.4),
-      transparent 60%
-    ),
+  --gradient-bg:
+    radial-gradient(ellipse at top, oklch(0.22 0.1 245 / 0.4), transparent 60%),
     radial-gradient(ellipse at bottom right, oklch(0.25 0.12 105 / 0.22), transparent 60%),
     linear-gradient(180deg, oklch(0.1 0.02 260), oklch(0.13 0.02 260));
   --gradient-neon: linear-gradient(135deg, oklch(0.7 0.22 245), oklch(0.6 0.24 265));
   --gradient-emerald: linear-gradient(135deg, oklch(0.92 0.2 105), oklch(0.85 0.22 90));
 
-  --shadow-neon: 0 0 0 1px oklch(0.7 0.22 245 / 0.4),
-    0 0 24px -4px oklch(0.7 0.22 245 / 0.55);
-  --shadow-emerald: 0 0 0 1px oklch(0.92 0.2 105 / 0.45),
-    0 8px 32px -8px oklch(0.92 0.2 105 / 0.55);
-  --shadow-glass: 0 8px 32px -8px oklch(0 0 0 / 0.6),
-    inset 0 1px 0 oklch(1 0 0 / 0.05);
+  --shadow-neon: 0 0 0 1px oklch(0.7 0.22 245 / 0.4), 0 0 24px -4px oklch(0.7 0.22 245 / 0.55);
+  --shadow-emerald:
+    0 0 0 1px oklch(0.92 0.2 105 / 0.45), 0 8px 32px -8px oklch(0.92 0.2 105 / 0.55);
+  --shadow-glass: 0 8px 32px -8px oklch(0 0 0 / 0.6), inset 0 1px 0 oklch(1 0 0 / 0.05);
 
   --glass-bg: oklch(0.17 0.02 260 / 0.55);
   --glass-border: oklch(1 0 0 / 0.08);
@@ -126,7 +121,8 @@
     position: fixed;
     inset: 0;
     pointer-events: none;
-    background-image: linear-gradient(var(--color-grid) 1px, transparent 1px),
+    background-image:
+      linear-gradient(var(--color-grid) 1px, transparent 1px),
       linear-gradient(90deg, var(--color-grid) 1px, transparent 1px);
     background-size: 48px 48px;
     mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
@@ -175,7 +171,8 @@
   .input-neon:focus {
     outline: none;
     border-color: var(--neon);
-    box-shadow: 0 0 0 3px oklch(0.7 0.22 245 / 0.2),
+    box-shadow:
+      0 0 0 3px oklch(0.7 0.22 245 / 0.2),
       0 0 24px -4px oklch(0.7 0.22 245 / 0.6);
   }
   .input-neon::placeholder {
@@ -189,13 +186,17 @@
     font-weight: 600;
     letter-spacing: 0.02em;
     box-shadow: var(--shadow-emerald);
-    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    transition:
+      transform 0.15s ease,
+      box-shadow 0.2s ease,
+      filter 0.2s ease;
     border: none;
     cursor: pointer;
   }
   .btn-emerald:hover {
     filter: brightness(1.08);
-    box-shadow: 0 0 0 1px oklch(0.92 0.2 105 / 0.65),
+    box-shadow:
+      0 0 0 1px oklch(0.92 0.2 105 / 0.65),
       0 12px 40px -10px oklch(0.92 0.2 105 / 0.8);
     transform: translateY(-1px);
   }
@@ -259,22 +260,66 @@
     border-radius: inherit;
   }
   @keyframes pulseNeon {
-    0%, 100% { box-shadow: 0 0 0 1px oklch(0.7 0.22 245 / 0.45), 0 0 12px -2px oklch(0.7 0.22 245 / 0.45); }
-    50% { box-shadow: 0 0 0 1px oklch(0.7 0.22 245 / 0.75), 0 0 28px -2px oklch(0.7 0.22 245 / 0.8); }
+    0%,
+    100% {
+      box-shadow:
+        0 0 0 1px oklch(0.7 0.22 245 / 0.45),
+        0 0 12px -2px oklch(0.7 0.22 245 / 0.45);
+    }
+    50% {
+      box-shadow:
+        0 0 0 1px oklch(0.7 0.22 245 / 0.75),
+        0 0 28px -2px oklch(0.7 0.22 245 / 0.8);
+    }
   }
-  .pulse-neon { animation: pulseNeon 2.4s ease-in-out infinite; }
+  .pulse-neon {
+    animation: pulseNeon 2.4s ease-in-out infinite;
+  }
 
-  /* Cenefa / ticker tape de indicadores económicos */
-  @keyframes tickerSlide {
-    0% { transform: translateX(0); }
-    100% { transform: translateX(-50%); }
+  @keyframes tickerMarquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
   }
+
   .ticker-track {
-    display: inline-flex;
-    gap: 2.5rem;
-    padding-right: 2.5rem;
-    animation: tickerSlide 60s linear infinite;
+    display: block;
+    min-width: 0;
+    overflow: hidden;
     white-space: nowrap;
   }
-  .ticker-track:hover { animation-play-state: paused; }
+  .ticker-content {
+    display: flex;
+    width: max-content;
+  }
+  .ticker-content-moving {
+    animation: tickerMarquee 48s linear infinite;
+    will-change: transform;
+  }
+  .ticker-group {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding-right: 1.5rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ticker-content-moving {
+      animation: none;
+      will-change: auto;
+    }
+    .ticker-group[aria-hidden="true"] {
+      display: none;
+    }
+    .ticker-track {
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .ticker-track::-webkit-scrollbar {
+      display: none;
+    }
+  }
 }

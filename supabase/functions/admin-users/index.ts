@@ -4,8 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -52,8 +51,7 @@ Deno.serve(async (req) => {
       .select("role")
       .eq("user_id", user.id);
     const isSuperAdmin =
-      callerRoles?.some((r: { role: string }) => r.role === "super_admin") ??
-      false;
+      callerRoles?.some((r: { role: string }) => r.role === "super_admin") ?? false;
     if (!isSuperAdmin) {
       return new Response(JSON.stringify({ error: "Forbidden" }), {
         status: 403,
@@ -66,8 +64,10 @@ Deno.serve(async (req) => {
 
     if (action === "list") {
       // List all auth users (admin API)
-      const { data: usersList, error: usersErr } =
-        await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      const { data: usersList, error: usersErr } = await admin.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      });
       if (usersErr) throw usersErr;
 
       const userIds = usersList.users.map((u) => u.id);
@@ -75,19 +75,11 @@ Deno.serve(async (req) => {
       const [profilesRes, rolesRes, recordsRes, ocrRes] = await Promise.all([
         admin.from("profiles").select("*").in("id", userIds),
         admin.from("user_roles").select("user_id, role, assigned_at"),
-        admin
-          .from("financial_records")
-          .select("user_id, amount, kind")
-          .in("user_id", userIds),
-        admin
-          .from("ocr_documents")
-          .select("user_id, doc_type")
-          .in("user_id", userIds),
+        admin.from("financial_records").select("user_id, amount, kind").in("user_id", userIds),
+        admin.from("ocr_documents").select("user_id, doc_type").in("user_id", userIds),
       ]);
 
-      const profilesMap = new Map(
-        (profilesRes.data ?? []).map((p: { id: string }) => [p.id, p]),
-      );
+      const profilesMap = new Map((profilesRes.data ?? []).map((p: { id: string }) => [p.id, p]));
       const rolesMap = new Map<string, string[]>();
       for (const r of rolesRes.data ?? []) {
         const arr = rolesMap.get(r.user_id) ?? [];
@@ -147,16 +139,14 @@ Deno.serve(async (req) => {
         await admin.auth.admin.getUserById(targetUserId);
       if (targetUserError) throw targetUserError;
       const protectedOwner =
-        targetAuthUser.user.email?.toLowerCase() === "jazzherre28@gmail.com";
+        targetAuthUser.user.email?.trim().toLowerCase() === "jazzherre28@gmail.com";
 
       if (action === "grant_role") {
-        const { error } = await admin
-          .from("user_roles")
-          .insert({
-            user_id: targetUserId,
-            role,
-            assigned_by: user.id,
-          });
+        const { error } = await admin.from("user_roles").insert({
+          user_id: targetUserId,
+          role,
+          assigned_by: user.id,
+        });
         if (error && !error.message.includes("duplicate")) throw error;
       } else {
         if (protectedOwner) {
@@ -209,25 +199,19 @@ Deno.serve(async (req) => {
         });
       }
       if (targetUserId === user.id) {
-        return new Response(
-          JSON.stringify({ error: "No puedes eliminarte a ti mismo" }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
+        return new Response(JSON.stringify({ error: "No puedes eliminarte a ti mismo" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
       const { data: targetAuthUser, error: targetUserError } =
         await admin.auth.admin.getUserById(targetUserId);
       if (targetUserError) throw targetUserError;
-      if (targetAuthUser.user.email?.toLowerCase() === "jazzherre28@gmail.com") {
-        return new Response(
-          JSON.stringify({ error: "La cuenta propietaria está protegida" }),
-          {
-            status: 403,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          },
-        );
+      if (targetAuthUser.user.email?.trim().toLowerCase() === "jazzherre28@gmail.com") {
+        return new Response(JSON.stringify({ error: "La cuenta propietaria está protegida" }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
       const { error } = await admin.auth.admin.deleteUser(targetUserId);
       if (error) throw error;
@@ -242,12 +226,9 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error("admin-users error:", e);
-    return new Response(
-      JSON.stringify({ error: (e as Error).message ?? "Server error" }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
+    return new Response(JSON.stringify({ error: (e as Error).message ?? "Server error" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });

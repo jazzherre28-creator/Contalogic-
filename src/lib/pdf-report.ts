@@ -107,6 +107,52 @@ function tableEnd(doc: jsPDF) {
   return (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
 }
 
+function downloadPdf(doc: jsPDF, fileName: string) {
+  const blob = doc.output("blob");
+  if (blob.size === 0) throw new Error("El PDF se generó vacío y no se puede descargar.");
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function drawFinancialBars(
+  doc: jsPDF,
+  y: number,
+  rows: Array<{ label: string; value: number; color: [number, number, number] }>,
+) {
+  const visibleRows = rows.filter(({ value }) => Number.isFinite(value));
+  const max = Math.max(0, ...visibleRows.map(({ value }) => Math.abs(value)));
+  if (visibleRows.length === 0 || max === 0) {
+    return paragraph(doc, y, "No hay cifras clasificadas suficientes para representar un gráfico.");
+  }
+
+  const rowHeight = 10;
+  y = nextPage(doc, y, visibleRows.length * rowHeight + 5);
+  visibleRows.forEach(({ label, value, color }, index) => {
+    const rowY = y + index * rowHeight;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...TEXT);
+    doc.text(wrap(doc, label, 48).slice(0, 1), M, rowY + 3);
+    doc.setFillColor(...LIGHT);
+    doc.rect(M + 52, rowY, 77, 4, "F");
+    doc.setFillColor(...color);
+    doc.rect(M + 52, rowY, Math.max(0.5, (Math.abs(value) / max) * 77), 4, "F");
+    doc.setTextColor(...MUTED);
+    doc.text(`${value < 0 ? "−" : ""}${fmtCompact(Math.abs(value))}`, 210 - M, rowY + 3, {
+      align: "right",
+    });
+  });
+  return y + visibleRows.length * rowHeight + 2;
+}
+
 function drawTable(doc: jsPDF, opts: Parameters<typeof autoTable>[1]) {
   autoTable(doc, {
     ...opts,
@@ -649,9 +695,26 @@ export function generateScannerReport(args: {
   fileName: string;
   docType: string;
   totals: Record<string, number>;
+  lineItems?: Array<{ label: string; value: number; period?: string }>;
+  comparativeLineItems?: Array<{ label: string; value: number; period?: string }>;
+  meta?: {
+    unitLabel?: string;
+    unitMultiplier?: number;
+    periodLabel?: string;
+    comparativePeriodLabel?: string;
+  };
   analysisMarkdown: string;
 }) {
-  const { profile, fileName, docType, totals, analysisMarkdown } = args;
+  const {
+    profile,
+    fileName,
+    docType,
+    totals,
+    lineItems = [],
+    comparativeLineItems = [],
+    meta,
+    analysisMarkdown,
+  } = args;
   const type = docType === "balance" ? "balance" : "pnl";
   const c = classifyTotals(totals);
   const quality = dataQualityScore(Object.keys(totals).filter((k) => totals[k] !== 0).length);
@@ -667,6 +730,14 @@ export function generateScannerReport(args: {
 
   /* --- KPIs segun tipo de documento --- */
   y = section(doc, y, "1", "Cifras principales");
+  if (meta?.unitLabel) {
+    y = diagnosis(
+      doc,
+      y,
+      `Fuente en ${meta.unitLabel}. El resumen financiero se normalizó a COP con factor × ${meta.unitMultiplier ?? 1}; la tabla de partidas conserva los valores impresos.`,
+      "ok",
+    );
+  }
   if (type === "balance") {
     const hasCapitalTrabajo = c.hasCurrentAssets && c.hasCurrentLiabilities;
     const capitalTrabajo = hasCapitalTrabajo ? c.activosCorrientes - c.pasivosCorrientes : null;
@@ -758,8 +829,59 @@ export function generateScannerReport(args: {
 
   y = paragraph(doc, y, quality.insight);
 
-  /* --- Tabla estructurada (no mezclar partidas crudas) --- */
-  y = section(doc, y, "2", type === "balance" ? "Estructura patrimonial" : "Estado de resultados");
+  y = section(doc, y, "2", "Gráfico de cifras principales (COP normalizados)");
+  const chartRows =
+    type === "balance"
+      ? [
+          { label: "Activos", value: c.hasTotalAssets ? c.activos : 0, color: OK },
+          { label: "Pasivos", value: c.hasTotalLiabilities ? c.pasivos : 0, color: BAD },
+          { label: "Patrimonio", value: c.hasEquity ? c.patrimonio : 0, color: ACCENT },
+        ]
+      : [
+          { label: "Ingresos", value: c.ingresos, color: OK },
+          { label: "Costos", value: c.costos, color: WARN },
+          { label: "Gastos operacionales", value: c.gastos, color: BAD },
+          { label: "Utilidad neta", value: c.hasNetIncome ? c.utilidadNeta : 0, color: ACCENT },
+        ];
+  y = drawFinancialBars(doc, y, chartRows);
+
+  y = section(doc, y, "3", "Partidas completas extraídas del documento");
+  const sourceRows = [
+    ...lineItems.map((item) => [
+      item.period ?? meta?.periodLabel ?? "Principal",
+      item.label,
+      `$ ${new Intl.NumberFormat("es-CO", { maximumFractionDigits: 2 }).format(item.value)}`,
+    ]),
+    ...comparativeLineItems.map((item) => [
+      item.period ?? meta?.comparativePeriodLabel ?? "Comparativo",
+      item.label,
+      `$ ${new Intl.NumberFormat("es-CO", { maximumFractionDigits: 2 }).format(item.value)}`,
+    ]),
+  ];
+  const sourceValueHeader =
+    `${sourceRows.length > 0 ? "Valor original" : "Valor COP"}` +
+    `${meta?.unitLabel ? ` (${meta.unitLabel})` : ""}`;
+  drawTable(doc, {
+    startY: y,
+    head: [["Periodo", "Concepto", sourceValueHeader]],
+    body:
+      sourceRows.length > 0
+        ? sourceRows
+        : Object.entries(totals).map(([label, value]) => [
+            "COP normalizados",
+            label,
+            fmtCOP(value),
+          ]),
+    columnStyles: {
+      0: { cellWidth: 38 },
+      1: { cellWidth: 88 },
+      2: { halign: "right", cellWidth: 48 },
+    },
+  });
+  y = tableEnd(doc);
+
+  /* --- Tabla estructurada: no mezclar partidas crudas con totales --- */
+  y = section(doc, y, "4", type === "balance" ? "Estructura patrimonial" : "Estado de resultados");
 
   if (type === "balance") {
     drawTable(doc, {
@@ -827,12 +949,12 @@ export function generateScannerReport(args: {
   y = tableEnd(doc);
 
   /* --- Indicadores --- */
-  y = section(doc, y, "3", "Indicadores financieros");
+  y = section(doc, y, "5", "Indicadores financieros");
   const indicators = type === "balance" ? computeBalanceIndicators(c) : computePnLIndicators(c);
   y = indicatorsTable(doc, y, indicators.slice(0, 10));
 
   /* --- Tributario: solo donde aplica --- */
-  y = section(doc, y, "4", "Informacion tributaria disponible");
+  y = section(doc, y, "6", "Informacion tributaria disponible");
   if (type === "pnl" && c.ingresos > 0) {
     const tax = buildTaxProjection(c.hasIncomeTax ? c.impuestoRenta : undefined);
     y = taxTable(doc, y, tax);
@@ -847,11 +969,11 @@ export function generateScannerReport(args: {
     );
   }
 
-  y = section(doc, y, "5", "Oportunidades de ahorro fiscal");
+  y = section(doc, y, "7", "Oportunidades de ahorro fiscal");
   y = savingsTable(doc, y, buildFiscalSavingsRows(totals, profile, type));
 
   if (c.otherEntries.length > 0) {
-    y = section(doc, y, "6", "Partidas OCR sin clasificar (revisar manualmente)");
+    y = section(doc, y, "8", "Partidas OCR sin clasificar (revisar manualmente)");
     drawTable(doc, {
       startY: y,
       head: [["Concepto detectado", "Valor"]],
@@ -864,11 +986,17 @@ export function generateScannerReport(args: {
     y = tableEnd(doc);
   }
 
-  y = section(doc, y, c.otherEntries.length > 0 ? "7" : "6", "Analisis LEX AI");
-  y = renderMarkdown(doc, y, analysisMarkdown);
+  y = section(doc, y, c.otherEntries.length > 0 ? "9" : "8", "Analisis LEX AI");
+  y = analysisMarkdown.trim()
+    ? renderMarkdown(doc, y, analysisMarkdown)
+    : paragraph(
+        doc,
+        y,
+        "El análisis de LEX AI no se ha ejecutado. Este reporte incluye las cifras extraídas, validaciones financieras y oportunidades tributarias orientativas.",
+      );
 
   footer(doc);
-  doc.save(`analisis-${docType}-${Date.now()}.pdf`);
+  downloadPdf(doc, `analisis-${docType}-${Date.now()}.pdf`);
 }
 
 export function generateBalanceReport(args: {
@@ -1405,7 +1533,8 @@ export function generateTransportTripReport(args: {
       .replace(/[^a-zA-Z0-9-]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 24) || "viaje";
-  doc.save(
+  downloadPdf(
+    doc,
     `calcutrans-${trip.tripDate}-${safePart(trip.origin)}-${safePart(trip.destination)}.pdf`,
   );
 }

@@ -6,42 +6,33 @@ type ComparativeDoc = {
   doc_type: "balance" | "pnl";
   parsed_data: {
     totals?: Record<string, number>;
-    lineItems?: Array<{ label: string; value: number; period?: string }>;
+    comparativeLineItems?: Array<{ label: string; value: number; period?: string }>;
     meta?: {
-      entryCount?: number;
-      charCount?: number;
-      source?: string;
-      unitLabel?: string;
-      unitMultiplier?: number;
       periodLabel?: string;
-      comparativePeriodLabel?: string;
+      unitMultiplier?: number;
     };
   } | null;
   file_name: string | null;
   created_at: string;
 };
 
-type Metric = {
+type ReturnMetric = {
   name: string;
-  previous: number | null;
   current: number | null;
-  unit: "currency" | "ratio" | "percent";
 };
 
-const formatCurrency = (value: number | null) =>
-  value == null
-    ? "N/D"
-    : new Intl.NumberFormat("es-CO", {
-        style: "currency",
-        currency: "COP",
-        maximumFractionDigits: 0,
-      }).format(value);
+const formatPercent = (value: number | null) =>
+  value == null || !Number.isFinite(value) ? "N/D" : `${value.toFixed(2)}%`;
 
-const formatMetric = (value: number | null, unit: Metric["unit"]) => {
-  if (value == null || !Number.isFinite(value)) return "N/D";
-  if (unit === "currency") return formatCurrency(value);
-  return unit === "ratio" ? `${value.toFixed(2)}x` : `${value.toFixed(1)}%`;
-};
+function comparativeTotals(doc: ComparativeDoc): Record<string, number> | null {
+  const items = doc.parsed_data?.comparativeLineItems;
+  if (!items?.length) return null;
+  const multiplier = doc.parsed_data?.meta?.unitMultiplier ?? 1;
+  return items.reduce<Record<string, number>>((totals, item) => {
+    totals[item.label] = (totals[item.label] ?? 0) + item.value * multiplier;
+    return totals;
+  }, {});
+}
 
 function documentLabel(doc: ComparativeDoc) {
   const period = doc.parsed_data?.meta?.periodLabel;
@@ -49,140 +40,6 @@ function documentLabel(doc: ComparativeDoc) {
   return period
     ? `${period} · ${name}`
     : `${name} · ${new Date(doc.created_at).toLocaleDateString("es-CO")}`;
-}
-
-const equityTotalLabel =
-  /^(?:total(?:es)?\s+)?patrimonio(?:\s+neto)?(?:\s+de\s+los\s+accionistas?)?$/i;
-const classifiedEquityTotalLabel =
-  /(?:^|\b)patrimonio(?:\s+neto)?$|(?:^|\b)total(?:es)?\s+patrimonio(?:\s+neto)?$|(?:^|\b)capital\s+(?:contable|propiedad)$/i;
-
-function classifyBalance(doc: ComparativeDoc) {
-  const totals = doc.parsed_data?.totals ?? {};
-  const explicitEquity = doc.parsed_data?.lineItems?.find(({ label }) =>
-    equityTotalLabel.test(label.trim()),
-  );
-  if (!explicitEquity) return classifyTotals(totals);
-
-  const totalsWithoutEquity = Object.fromEntries(
-    Object.entries(totals).filter(
-      ([label]) =>
-        !equityTotalLabel.test(label.trim()) && !classifiedEquityTotalLabel.test(label.trim()),
-    ),
-  );
-  return classifyTotals({ ...totalsWithoutEquity, Patrimonio: explicitEquity.value });
-}
-
-function balanceMetrics(previousDoc: ComparativeDoc, currentDoc: ComparativeDoc) {
-  const previous = classifyBalance(previousDoc);
-  const current = classifyBalance(currentDoc);
-  const previousWorkingCapital =
-    previous.hasCurrentAssets && previous.hasCurrentLiabilities
-      ? previous.activosCorrientes - previous.pasivosCorrientes
-      : null;
-  const currentWorkingCapital =
-    current.hasCurrentAssets && current.hasCurrentLiabilities
-      ? current.activosCorrientes - current.pasivosCorrientes
-      : null;
-
-  const metric = (
-    name: string,
-    previousValue: number | null,
-    currentValue: number | null,
-    unit: Metric["unit"],
-  ): Metric => ({ name, previous: previousValue, current: currentValue, unit });
-
-  return {
-    metrics: [
-      metric(
-        "Activos totales",
-        previous.hasTotalAssets ? previous.activos : null,
-        current.hasTotalAssets ? current.activos : null,
-        "currency",
-      ),
-      metric(
-        "Activos corrientes",
-        previous.hasCurrentAssets ? previous.activosCorrientes : null,
-        current.hasCurrentAssets ? current.activosCorrientes : null,
-        "currency",
-      ),
-      metric(
-        "Pasivos totales",
-        previous.hasTotalLiabilities ? previous.pasivos : null,
-        current.hasTotalLiabilities ? current.pasivos : null,
-        "currency",
-      ),
-      metric(
-        "Pasivos corrientes",
-        previous.hasCurrentLiabilities ? previous.pasivosCorrientes : null,
-        current.hasCurrentLiabilities ? current.pasivosCorrientes : null,
-        "currency",
-      ),
-      metric(
-        "Patrimonio",
-        previous.hasEquity ? previous.patrimonio : null,
-        current.hasEquity ? current.patrimonio : null,
-        "currency",
-      ),
-      metric("Capital de trabajo", previousWorkingCapital, currentWorkingCapital, "currency"),
-      metric(
-        "Razón corriente",
-        previous.hasCurrentAssets &&
-          previous.hasCurrentLiabilities &&
-          previous.pasivosCorrientes > 0
-          ? previous.activosCorrientes / previous.pasivosCorrientes
-          : null,
-        current.hasCurrentAssets && current.hasCurrentLiabilities && current.pasivosCorrientes > 0
-          ? current.activosCorrientes / current.pasivosCorrientes
-          : null,
-        "ratio",
-      ),
-      metric(
-        "Solvencia (activos / pasivos)",
-        previous.hasTotalAssets && previous.hasTotalLiabilities && previous.pasivos > 0
-          ? previous.activos / previous.pasivos
-          : null,
-        current.hasTotalAssets && current.hasTotalLiabilities && current.pasivos > 0
-          ? current.activos / current.pasivos
-          : null,
-        "ratio",
-      ),
-      metric(
-        "Endeudamiento",
-        previous.hasTotalAssets && previous.activos > 0
-          ? (previous.pasivos / previous.activos) * 100
-          : null,
-        current.hasTotalAssets && current.activos > 0
-          ? (current.pasivos / current.activos) * 100
-          : null,
-        "percent",
-      ),
-      metric(
-        "Autonomía financiera",
-        previous.hasEquity && previous.hasTotalAssets && previous.activos > 0
-          ? (previous.patrimonio / previous.activos) * 100
-          : null,
-        current.hasEquity && current.hasTotalAssets && current.activos > 0
-          ? (current.patrimonio / current.activos) * 100
-          : null,
-        "percent",
-      ),
-    ],
-    previous,
-    current,
-  };
-}
-
-function variation(metric: Metric) {
-  const { previous, current, unit } = metric;
-  if (previous == null || current == null) return "N/D";
-  if (unit === "currency") {
-    if (previous === 0) return current === 0 ? "0.0%" : "N/D";
-    const change = ((current - previous) / Math.abs(previous)) * 100;
-    return `${change > 0 ? "+" : ""}${change.toFixed(1)}%`;
-  }
-  const change = current - previous;
-  const suffix = unit === "ratio" ? "x" : " pp";
-  return `${change > 0 ? "+" : ""}${change.toFixed(2)}${suffix}`;
 }
 
 export function ComparativeFinancialAnalysis({ docs }: { docs: ComparativeDoc[] }) {
@@ -200,172 +57,90 @@ export function ComparativeFinancialAnalysis({ docs }: { docs: ComparativeDoc[] 
     balanceDocs.find((doc) => doc.id !== closingDoc.id);
   const pnlDoc = pnlDocs.find((doc) => doc.id === pnlId) ?? pnlDocs[0];
 
-  const analysis = openingDoc ? balanceMetrics(openingDoc, closingDoc) : null;
-  const closingBalanceAnalysis = balanceMetrics(closingDoc, closingDoc);
-  const closingBalance = closingBalanceAnalysis.current;
+  const closingBalance = classifyTotals(closingDoc.parsed_data?.totals ?? {});
+  const comparative = comparativeTotals(closingDoc);
+  const openingBalance = openingDoc
+    ? classifyTotals(openingDoc.parsed_data?.totals ?? {})
+    : comparative
+      ? classifyTotals(comparative)
+      : null;
   const pnl = pnlDoc ? classifyTotals(pnlDoc.parsed_data?.totals ?? {}) : null;
-  const averageAssets =
-    analysis?.previous.hasTotalAssets && analysis.current.hasTotalAssets
-      ? (analysis.previous.activos + analysis.current.activos) / 2
-      : null;
-  const averageEquity =
-    analysis?.previous.hasEquity && analysis.current.hasEquity
-      ? (analysis.previous.patrimonio + analysis.current.patrimonio) / 2
-      : null;
   const netIncome = pnl?.hasNetIncome ? pnl.utilidadNeta : null;
-  const returnAssets = analysis
-    ? averageAssets
+  const averageAssets = openingBalance
+    ? openingBalance.hasTotalAssets && closingBalance.hasTotalAssets
+      ? (openingBalance.activos + closingBalance.activos) / 2
+      : null
     : closingBalance.hasTotalAssets
       ? closingBalance.activos
       : null;
-  const returnEquity = analysis
-    ? averageEquity
+  const averageEquity = openingBalance
+    ? openingBalance.hasEquity && closingBalance.hasEquity
+      ? (openingBalance.patrimonio + closingBalance.patrimonio) / 2
+      : null
     : closingBalance.hasEquity
       ? closingBalance.patrimonio
       : null;
-  const returnBasis = analysis ? "promedio" : "saldo al cierre";
-  const returnMetrics: Metric[] = [
+  const returnMetrics: ReturnMetric[] = [
     {
-      name: `ROA · utilidad neta / activos ${returnBasis}`,
-      previous: null,
+      name: "ROE",
       current:
-        netIncome != null && returnAssets != null && returnAssets > 0
-          ? (netIncome / returnAssets) * 100
+        netIncome != null && averageEquity != null && averageEquity > 0
+          ? (netIncome / averageEquity) * 100
           : null,
-      unit: "percent",
     },
     {
-      name: `ROE · utilidad neta / patrimonio ${returnBasis}`,
-      previous: null,
+      name: "RAE",
       current:
-        netIncome != null && returnEquity != null && returnEquity > 0
-          ? (netIncome / returnEquity) * 100
+        netIncome != null && averageAssets != null && averageAssets > 0
+          ? (netIncome / averageAssets) * 100
           : null,
-      unit: "percent",
     },
   ];
 
   return (
     <section className="glass space-y-4 p-5">
       <div>
-        <h3 className="text-sm font-semibold">Comparación financiera entre periodos</h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Compara dos estados de situación financiera. Los cambios monetarios son porcentuales; en
-          ratios se muestran diferencias en veces o puntos porcentuales.
-        </p>
+        <h3 className="text-sm font-semibold">Comparativo de rentabilidad</h3>
       </div>
 
       {balanceDocs.length >= 2 ? (
-        <>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="space-y-1 text-xs text-muted-foreground">
-              Periodo inicial
-              <select
-                value={openingDoc?.id ?? ""}
-                onChange={(event) => setOpeningId(event.target.value)}
-                className="input-neon w-full text-sm"
-              >
-                {balanceDocs
-                  .filter((doc) => doc.id !== closingDoc.id)
-                  .map((doc) => (
-                    <option key={doc.id} value={doc.id}>
-                      {documentLabel(doc)}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="space-y-1 text-xs text-muted-foreground">
-              Periodo final
-              <select
-                value={closingDoc.id}
-                onChange={(event) => setClosingId(event.target.value)}
-                className="input-neon w-full text-sm"
-              >
-                {balanceDocs.map((doc) => (
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="space-y-1 text-xs text-muted-foreground">
+            Periodo inicial
+            <select
+              value={openingDoc?.id ?? ""}
+              onChange={(event) => setOpeningId(event.target.value)}
+              className="input-neon w-full text-sm"
+            >
+              {balanceDocs
+                .filter((doc) => doc.id !== closingDoc.id)
+                .map((doc) => (
                   <option key={doc.id} value={doc.id}>
                     {documentLabel(doc)}
                   </option>
                 ))}
-              </select>
-            </label>
-          </div>
-
-          {analysis && (
-            <div className="overflow-x-auto rounded-lg border border-white/10">
-              <table className="w-full min-w-[620px] text-xs">
-                <thead className="bg-slate-950/80 text-muted-foreground">
-                  <tr className="border-b border-white/10">
-                    <th className="px-3 py-2 text-left">Indicador</th>
-                    <th className="px-3 py-2 text-right">Inicial</th>
-                    <th className="px-3 py-2 text-right">Final</th>
-                    <th className="px-3 py-2 text-right">Variación</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...analysis.metrics, ...returnMetrics].map((metric) => (
-                    <tr key={metric.name} className="border-b border-white/5">
-                      <td className="px-3 py-2 text-slate-200">{metric.name}</td>
-                      <td className="px-3 py-2 text-right font-mono">
-                        {formatMetric(metric.previous, metric.unit)}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono text-neon">
-                        {formatMetric(metric.current, metric.unit)}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono text-slate-300">
-                        {metric.previous == null && metric.current != null
-                          ? "Periodo analizado"
-                          : variation(metric)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
-      ) : (
-        <div className="space-y-3">
-          <p className="rounded-lg border border-white/10 bg-white/[0.02] p-3 text-sm text-muted-foreground">
-            Análisis integrado del balance disponible y el estado de resultados. Para comparar
-            cambios entre periodos necesitas cargar otro balance.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Balance seleccionado: {documentLabel(closingDoc)}
-          </p>
-          <div className="overflow-x-auto rounded-lg border border-white/10">
-            <table className="w-full min-w-[360px] text-xs">
-              <thead className="bg-slate-950/80 text-muted-foreground">
-                <tr className="border-b border-white/10">
-                  <th className="px-3 py-2 text-left">Indicador del balance</th>
-                  <th className="px-3 py-2 text-right">Valor</th>
-                </tr>
-              </thead>
-              <tbody>
-                {closingBalanceAnalysis.metrics.map((metric) => (
-                  <tr key={metric.name} className="border-b border-white/5">
-                    <td className="px-3 py-2 text-slate-200">{metric.name}</td>
-                    <td className="px-3 py-2 text-right font-mono text-neon">
-                      {formatMetric(metric.current, metric.unit)}
-                    </td>
-                  </tr>
-                ))}
-                {returnMetrics.map((metric) => (
-                  <tr key={metric.name} className="border-b border-white/5">
-                    <td className="px-3 py-2 text-slate-200">{metric.name}</td>
-                    <td className="px-3 py-2 text-right font-mono text-neon">
-                      {formatMetric(metric.current, metric.unit)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            </select>
+          </label>
+          <label className="space-y-1 text-xs text-muted-foreground">
+            Periodo final
+            <select
+              value={closingDoc.id}
+              onChange={(event) => setClosingId(event.target.value)}
+              className="input-neon w-full text-sm"
+            >
+              {balanceDocs.map((doc) => (
+                <option key={doc.id} value={doc.id}>
+                  {documentLabel(doc)}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-      )}
+      ) : null}
 
       {pnlDocs.length > 0 ? (
         <label className="block max-w-2xl space-y-1 text-xs text-muted-foreground">
-          Estado de resultados para rentabilidad (opcional)
+          Estado de resultados
           <select
             value={pnlDoc?.id ?? ""}
             onChange={(event) => setPnlId(event.target.value)}
@@ -378,28 +153,28 @@ export function ComparativeFinancialAnalysis({ docs }: { docs: ComparativeDoc[] 
             ))}
           </select>
         </label>
-      ) : (
-        <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-100">
-          ROA y ROE requieren utilidad neta del estado de resultados. Carga también el P&amp;L para
-          calcularlos.
-        </p>
-      )}
+      ) : null}
 
-      {pnlDoc && netIncome == null && (
-        <p className="text-xs text-amber-100">
-          El P&amp;L seleccionado no presenta utilidad neta identificable; ROA y ROE quedan como N/D
-          para no estimar el resultado.
-        </p>
-      )}
-      {pnlDoc && netIncome != null && (
-        <p className="text-xs text-muted-foreground">
-          ROA/ROE usan la utilidad neta explícita del P&amp;L seleccionado.{" "}
-          {analysis
-            ? "Se calculan sobre los saldos promedio de ambos balances."
-            : "Con un solo balance, se calculan sobre activos y patrimonio al cierre; no equivalen al método estándar con saldos promedio."}{" "}
-          Confirma que los documentos correspondan a la misma entidad, periodo y unidad monetaria.
-        </p>
-      )}
+      <div className="overflow-x-auto rounded-lg border border-white/10">
+        <table className="w-full min-w-[300px] text-xs">
+          <thead className="bg-slate-950/80 text-muted-foreground">
+            <tr className="border-b border-white/10">
+              <th className="px-3 py-2 text-left">Indicador</th>
+              <th className="px-3 py-2 text-right">Resultado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {returnMetrics.map((metric) => (
+              <tr key={metric.name} className="border-b border-white/5">
+                <td className="px-3 py-2 text-slate-200">{metric.name}</td>
+                <td className="px-3 py-2 text-right font-mono text-neon">
+                  {formatPercent(metric.current)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

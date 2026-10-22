@@ -21,14 +21,14 @@ import {
   CircleDot,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { supabase } from "@/integrations/supabase/client";
 import { ENTITY_LABEL, SECTOR_LABEL } from "@/lib/sectors";
 import {
-  CATEGORY_LABEL,
   DIDACTIC_TIPS,
+  CATEGORY_LABEL,
   PRIORITY_LABEL,
   TAX_REFORMS,
   daysUntil,
-  filterRemindersForEntity,
   sortByUrgency,
   type ReminderCategory,
   type ReminderPriority,
@@ -66,10 +66,7 @@ const TIP_ICONS = {
   book: BookOpen,
 };
 
-const PRIORITY_STYLES: Record<
-  ReminderPriority,
-  { border: string; badge: string; dot: string }
-> = {
+const PRIORITY_STYLES: Record<ReminderPriority, { border: string; badge: string; dot: string }> = {
   urgent: {
     border: "border-rose-500/40",
     badge: "bg-rose-500/15 text-rose-400 border-rose-500/30",
@@ -132,17 +129,16 @@ function ReminderCard({ reminder, compact }: { reminder: TaxReminder; compact?: 
   const CatIcon = CATEGORY_ICONS[reminder.category];
 
   return (
-    <article
-      className={cn(
-        "glass rounded-xl border p-4",
-        styles.border,
-        compact && "p-3",
-      )}
-    >
+    <article className={cn("glass rounded-xl border p-4", styles.border, compact && "p-3")}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <div className={cn("h-2 w-2 rounded-full", styles.dot)} />
-          <span className={cn("rounded-md border px-2 py-0.5 font-mono text-[9px] uppercase", styles.badge)}>
+          <span
+            className={cn(
+              "rounded-md border px-2 py-0.5 font-mono text-[9px] uppercase",
+              styles.badge,
+            )}
+          >
             {PRIORITY_LABEL[reminder.priority]}
           </span>
           <span className="chip !py-0.5 !text-[9px]">
@@ -157,7 +153,9 @@ function ReminderCard({ reminder, compact }: { reminder: TaxReminder; compact?: 
         {reminder.title}
       </h3>
       {!compact && (
-        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{reminder.description}</p>
+        <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+          {reminder.description}
+        </p>
       )}
 
       <div className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
@@ -187,15 +185,7 @@ function ReminderCard({ reminder, compact }: { reminder: TaxReminder; compact?: 
   );
 }
 
-function SlideHeader({
-  step,
-  title,
-  subtitle,
-}: {
-  step: number;
-  title: string;
-  subtitle: string;
-}) {
+function SlideHeader({ step, title, subtitle }: { step: number; title: string; subtitle: string }) {
   return (
     <div className="mb-4">
       <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -226,11 +216,102 @@ export function TaxRemindersBoard() {
   const { profile } = useAuth();
   const [api, setApi] = useState<CarouselApi>();
   const [current, setCurrent] = useState(0);
+  const [deadlineRows, setDeadlineRows] = useState<
+    Array<{
+      id: string;
+      obligation: string;
+      entity_type: string;
+      sector: string;
+      period: string;
+      due_date: string;
+      nit_last_digit: number | null;
+      nit_group: string | null;
+      description: string | null;
+    }>
+  >([]);
+  const [deadlineError, setDeadlineError] = useState<string | null>(null);
 
-  const reminders = useMemo(
-    () => sortByUrgency(filterRemindersForEntity(profile?.entity_type)),
-    [profile?.entity_type],
-  );
+  useEffect(() => {
+    let isCurrent = true;
+    const today = new Date();
+    const dateOnly = (date: Date) =>
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const throughDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 90);
+
+    supabase
+      .from("tax_deadlines")
+      .select(
+        "id, obligation, entity_type, sector, period, due_date, nit_last_digit, nit_group, description",
+      )
+      .gte("due_date", dateOnly(today))
+      .lte("due_date", dateOnly(throughDate))
+      .order("due_date", { ascending: true })
+      .limit(300)
+      .then(({ data, error }) => {
+        if (!isCurrent) return;
+        if (error) {
+          console.error("No se pudieron cargar los vencimientos del tablero", error);
+          setDeadlineError("No fue posible cargar los próximos vencimientos.");
+          return;
+        }
+        setDeadlineError(null);
+        setDeadlineRows(data ?? []);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
+  const reminders = useMemo(() => {
+    const relevantDeadlines = deadlineRows.filter((deadline) => {
+      const matchEntity =
+        !profile?.entity_type ||
+        deadline.entity_type === "ambas" ||
+        deadline.entity_type === profile.entity_type;
+      const matchSector =
+        !profile?.sector || deadline.sector === "todos" || deadline.sector === profile.sector;
+      const matchNit =
+        deadline.nit_last_digit === null ||
+        profile?.nit_last_digit === null ||
+        profile?.nit_last_digit === undefined ||
+        deadline.nit_last_digit === profile.nit_last_digit;
+      return matchEntity && matchSector && matchNit;
+    });
+
+    return sortByUrgency(
+      relevantDeadlines.map((deadline) => {
+        const remainingDays = daysUntil(deadline.due_date);
+        const category: ReminderCategory =
+          /renta|patrimonio|transferencia|activos|declaración anual/i.test(deadline.obligation)
+            ? "reportes"
+            : /iva|retención|anticipo|impuesto al consumo/i.test(deadline.obligation)
+              ? "pagos"
+              : "dian";
+        const priority: ReminderPriority =
+          remainingDays <= 7 ? "urgent" : remainingDays <= 30 ? "soon" : "upcoming";
+        const nitLabel = deadline.nit_group
+          ? `Grupo NIT ${deadline.nit_group}`
+          : deadline.nit_last_digit !== null
+            ? `NIT terminado en ${deadline.nit_last_digit}`
+            : "";
+
+        return {
+          id: deadline.id,
+          title: deadline.obligation,
+          description: [deadline.period, nitLabel, deadline.description]
+            .filter(Boolean)
+            .join(" · "),
+          category,
+          priority,
+          dueDate: deadline.due_date,
+          tip: "Confirma que esta obligación aplica a tu situación y revisa el calendario oficial DIAN.",
+          link: "https://www.dian.gov.co/Calendarios/Calendario_Tributario_2026.pdf",
+          linkLabel: "Calendario oficial DIAN 2026",
+        };
+      }),
+    );
+  }, [deadlineRows, profile?.entity_type, profile?.nit_last_digit, profile?.sector]);
 
   const urgent = reminders.filter((r) => r.priority === "urgent" || r.priority === "soon");
   const byCategory = (cat: ReminderCategory) => reminders.filter((r) => r.category === cat);
@@ -288,6 +369,15 @@ export function TaxRemindersBoard() {
                   title={`Hola, ${profile?.display_name ?? "contribuyente"}`}
                   subtitle="Tu centro de control tributario — desliza o usa las pestañas para ver cada sección."
                 />
+
+                {deadlineError && (
+                  <p
+                    role="alert"
+                    className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200"
+                  >
+                    {deadlineError} Consulta el calendario DIAN completo para verificar tus plazos.
+                  </p>
+                )}
 
                 <div className="mb-4 flex flex-wrap gap-2">
                   {profile?.entity_type && (
@@ -356,8 +446,9 @@ export function TaxRemindersBoard() {
                 {urgent.length > 0 && (
                   <div className="mt-4 rounded-lg border border-[oklch(0.92_0.2_105/0.25)] bg-[oklch(0.92_0.2_105/0.06)] p-3">
                     <p className="text-xs text-emerald-glow/90">
-                      <strong>Qué hacer hoy:</strong> verifica tu calendario DIAN según el último dígito del NIT,
-                      prepara formularios 300/350 y consigna PILA si tienes empleados.
+                      <strong>Qué hacer hoy:</strong> verifica tu calendario DIAN según el último
+                      dígito del NIT, prepara formularios 300/350 y consigna PILA si tienes
+                      empleados.
                     </p>
                   </div>
                 )}
@@ -372,7 +463,10 @@ export function TaxRemindersBoard() {
                   title="Trámites DIAN"
                   subtitle="RUT, facturación electrónica y obligaciones formales ante la DIAN."
                 />
-                <ReminderList items={byCategory("dian")} empty="Sin recordatorios DIAN para tu régimen." />
+                <ReminderList
+                  items={byCategory("dian")}
+                  empty="Sin recordatorios DIAN para tu régimen."
+                />
               </div>
             </CarouselItem>
 
@@ -438,7 +532,9 @@ export function TaxRemindersBoard() {
                         ))}
                       </div>
                       <h3 className="mt-2 text-sm font-semibold">{reform.title}</h3>
-                      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{reform.summary}</p>
+                      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                        {reform.summary}
+                      </p>
                     </article>
                   ))}
                 </div>
@@ -465,7 +561,9 @@ export function TaxRemindersBoard() {
                           </div>
                           <h3 className="text-xs font-semibold">{tip.title}</h3>
                         </div>
-                        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{tip.body}</p>
+                        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                          {tip.body}
+                        </p>
                       </div>
                     );
                   })}
@@ -536,10 +634,18 @@ export function TaxRemindersBoard() {
 function ReminderList({ items, empty }: { items: TaxReminder[]; empty: string }) {
   if (items.length === 0) return <EmptyState text={empty} />;
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      {items.map((r) => (
-        <ReminderCard key={r.id} reminder={r} />
-      ))}
+    <div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {items.slice(0, 6).map((r) => (
+          <ReminderCard key={r.id} reminder={r} />
+        ))}
+      </div>
+      <Link
+        to="/calendar"
+        className="mt-4 inline-flex text-xs font-semibold text-neon hover:underline"
+      >
+        Ver calendario DIAN completo →
+      </Link>
     </div>
   );
 }
@@ -563,13 +669,21 @@ function MiniStat({
 }) {
   const styles = {
     rose: { text: "text-rose-400", box: "border-rose-500/20 bg-rose-500/8" },
-    neon: { text: "text-neon", box: "border-[oklch(0.7_0.22_245/0.25)] bg-[oklch(0.7_0.22_245/0.08)]" },
-    emerald: { text: "text-emerald-glow", box: "border-[oklch(0.92_0.2_105/0.25)] bg-[oklch(0.92_0.2_105/0.08)]" },
+    neon: {
+      text: "text-neon",
+      box: "border-[oklch(0.7_0.22_245/0.25)] bg-[oklch(0.7_0.22_245/0.08)]",
+    },
+    emerald: {
+      text: "text-emerald-glow",
+      box: "border-[oklch(0.92_0.2_105/0.25)] bg-[oklch(0.92_0.2_105/0.08)]",
+    },
   }[tone];
 
   return (
     <div className={cn("rounded-lg border p-3", styles.box)}>
-      <div className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
       <div className={cn("text-xl font-bold tabular-nums", styles.text)}>{value}</div>
     </div>
   );

@@ -12,12 +12,16 @@ export type TaxSavingTip = {
 };
 
 const fmtCOP = (n: number) =>
-  new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(n);
 
 export function computeTaxSavings(
   totals: Record<string, number>,
   profile: ReportProfile,
-  docType: "balance" | "pnl" = "pnl"
+  docType: "balance" | "pnl" = "pnl",
 ): TaxSavingTip[] {
   const c = classifyTotals(totals);
   const isJuridica = profile.entity_type === "juridica";
@@ -35,7 +39,8 @@ export function computeTaxSavings(
       article: "Art. 485 E.T.",
       description: `El estado informa costos y gastos, pero no identifica facturas, IVA discriminado ni operaciones con derecho a descuento. No es posible cuantificar el IVA descontable con este documento.`,
       potentialSaving: 0,
-      action: "Verifica que todas las facturas de compra tengan IVA discriminado y estén soportadas. Radica la declaración bimestral sin omitir crédito fiscal.",
+      action:
+        "Verifica que todas las facturas de compra tengan IVA discriminado y estén soportadas. Presenta la declaración con la periodicidad que te corresponda.",
       priority: "alta",
     });
   }
@@ -46,9 +51,11 @@ export function computeTaxSavings(
       id: "deducc-107",
       title: "Deducciones ordinarias de gastos",
       article: "Art. 107 E.T.",
-      description: "Los gastos necesarios para producir renta son deducibles si están debidamente documentados y relacionados con la actividad.",
+      description:
+        "Los gastos necesarios para producir renta son deducibles si están debidamente documentados y relacionados con la actividad.",
       potentialSaving: 0,
-      action: "Clasifica y documenta gastos de nómina, arrendamiento, servicios públicos, asesoría y tecnología. Evita gastos sin factura electrónica.",
+      action:
+        "Clasifica y documenta gastos de nómina, arrendamiento, servicios públicos, asesoría y tecnología. Evita gastos sin factura electrónica.",
       priority: "alta",
     });
   }
@@ -59,9 +66,11 @@ export function computeTaxSavings(
       id: "rst",
       title: "Régimen Simple de Tributación (RST)",
       article: "Art. 905-1 E.T.",
-      description: "La elegibilidad y el impuesto del RST dependen de actividad, ingresos brutos, topes, tarifas y anticipos. Este estado no basta para comparar la carga tributaria.",
+      description:
+        "La elegibilidad y el impuesto del RST dependen de actividad, ingresos brutos, topes, tarifas y anticipos. Este estado no basta para comparar la carga tributaria.",
       potentialSaving: 0,
-      action: "Compara tu carga actual vs. RST con un contador. Evalúa migración si el ahorro supera el 15% de impuesto de renta.",
+      action:
+        "Compara tu carga actual frente al RST con un contador usando ingresos, actividad, anticipos y obligaciones aplicables antes de elegir régimen.",
       priority: "media",
     });
   }
@@ -72,9 +81,11 @@ export function computeTaxSavings(
       id: "deprec",
       title: "Depreciación de activos fijos",
       article: "Art. 136-137 E.T.",
-      description: "Los activos depreciables generan deducción anual que reduce la base gravable de renta.",
+      description:
+        "Los activos depreciables generan deducción anual que reduce la base gravable de renta.",
       potentialSaving: 0,
-      action: "Actualiza el activo fijo en contabilidad, aplica tarifas legales de depreciación y conserva facturas de adquisición.",
+      action:
+        "Actualiza el activo fijo en contabilidad, aplica tarifas legales de depreciación y conserva facturas de adquisición.",
       priority: "media",
     });
   }
@@ -85,9 +96,11 @@ export function computeTaxSavings(
       id: "retenciones",
       title: "Optimización de retenciones practicadas",
       article: "Art. 383-401 E.T.",
-      description: "El estado no presenta certificados ni saldos de retención. Las retenciones efectivamente practicadas son anticipos y solo pueden conciliarse con esos soportes.",
+      description:
+        "El estado no presenta certificados ni saldos de retención. Las retenciones efectivamente practicadas son anticipos y solo pueden conciliarse con esos soportes.",
       potentialSaving: 0,
-      action: "Concilia certificados de retención con ingresos facturados. Solicita corrección si hay retenciones por encima de la tarifa legal.",
+      action:
+        "Concilia certificados de retención con ingresos facturados. Solicita corrección si hay retenciones por encima de la tarifa legal.",
       priority: "media",
     });
   }
@@ -100,7 +113,8 @@ export function computeTaxSavings(
       article: "Art. 118-122 E.T.",
       description: `Gastos financieros detectados: ${fmtCOP(c.gastosFinancieros)}. Los intereses sobre deudas de negocio son deducibles con límites.`,
       potentialSaving: 0,
-      action: "Separa intereses de capital en extractos bancarios. Documenta el destino empresarial del crédito.",
+      action:
+        "Separa intereses de capital en extractos bancarios. Documenta el destino empresarial del crédito.",
       priority: "media",
     });
   }
@@ -111,9 +125,11 @@ export function computeTaxSavings(
       id: "ica",
       title: "ICA — verifica tarifa municipal",
       article: "Normativa municipal aplicable",
-      description: "La tarifa y base del ICA dependen del municipio y actividad. El estado financiero no identifica ciudad, CIIU ni ingresos gravados, por lo que no se cuantifica un posible ahorro.",
+      description:
+        "La tarifa y base del ICA dependen del municipio y actividad. El estado financiero no identifica ciudad, CIIU ni ingresos gravados, por lo que no se cuantifica un posible ahorro.",
       potentialSaving: 0,
-      action: "Revisa el CIIU registrado en RUES y la tarifa en el acuerdo municipal. Solicita devolución o compensación si aplica.",
+      action:
+        "Revisa el CIIU registrado en RUES y la tarifa en el acuerdo municipal. Solicita devolución o compensación si aplica.",
       priority: "baja",
     });
   }
@@ -124,9 +140,11 @@ export function computeTaxSavings(
       id: "planeacion",
       title: "Planeación fiscal empresarial",
       article: "Arts. 235-2, 771-5 E.T.",
-      description: "La provisión de cartera, remuneraciones y distribuciones tienen tratamientos distintos y requisitos específicos. No se puede cuantificar ahorro solo con el estado resumido.",
+      description:
+        "La provisión de cartera, remuneraciones y distribuciones tienen tratamientos distintos y requisitos específicos. No se puede cuantificar ahorro solo con el estado resumido.",
       potentialSaving: 0,
-      action: "Evalúa provisión de cartera incobrable, bonos de empleados y timing de distribución de dividendos con asesoría profesional.",
+      action:
+        "Evalúa provisión de cartera incobrable, bonos de empleados y timing de distribución de dividendos con asesoría profesional.",
       priority: "media",
     });
   }
@@ -137,7 +155,8 @@ export function computeTaxSavings(
       id: "general",
       title: "Escanea tu Estado de Resultados",
       article: "Estatuto Tributario",
-      description: "Sube un P&L o balance en el Escáner OCR para calcular oportunidades personalizadas de ahorro tributario.",
+      description:
+        "Sube un P&L o balance en el Escáner OCR para calcular oportunidades personalizadas de ahorro tributario.",
       potentialSaving: 0,
       action: "Ve a Escáner OCR → carga tu estado financiero → abre la pestaña Ahorro fiscal.",
       priority: "alta",
@@ -150,7 +169,7 @@ export function computeTaxSavings(
 export const GENERAL_TAX_TIPS = [
   {
     title: "Facturación electrónica",
-    text: "Toda compra deducible requiere factura electrónica válida ante la DIAN. Sin esto, pierdes IVA descontable y deducción de renta.",
+    text: "Conserva la factura electrónica o el documento soporte que exija la norma para cada operación. Verifica validación, identificación y relación con la actividad antes de solicitar costos, deducciones o IVA descontable.",
   },
   {
     title: "Contabilidad organizada",
@@ -158,7 +177,7 @@ export const GENERAL_TAX_TIPS = [
   },
   {
     title: "Calendario tributario",
-    text: "Usa el Calendario DIAN de la app para no incurrir en sanciones por extemporaneidad, que pueden superar el 5% del impuesto.",
+    text: "Consulta el vencimiento oficial que corresponda a la obligación y al grupo de NIT. Las sanciones dependen de la obligación, el tiempo de mora y las reglas vigentes.",
   },
   {
     title: "Asesoría profesional",
