@@ -31,7 +31,7 @@ export const Route = createRootRoute({
       { title: "CONTALOGIC AI+ — Terminal Financiera Universal" },
       { name: "theme-color", content: "#0b1020" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
-      { name: "apple-mobile-web-app-title", content: "Contalogic" },
+      { name: "apple-mobile-web-app-title", content: "CONTALOGIC AI+" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
       {
         name: "description",
