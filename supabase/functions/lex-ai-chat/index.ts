@@ -45,20 +45,25 @@ ${enfoqueLegal}
 
     const requestModel = (model: string) =>
       fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(LOVABLE_API_KEY)}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(LOVABLE_API_KEY)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents: messages.map((message: { role: string; content: string }) => ({
+            contents: messages.slice(-12).map((message: { role: string; content: string }) => ({
               role: message.role === "assistant" ? "model" : "user",
               parts: [{ text: message.content }],
             })),
           }),
         },
       );
-    const models = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"];
+    const models = [
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
+      "gemini-3.6-flash",
+      "gemini-3.8-flash",
+    ];
     let response = await requestModel(models[0]);
     for (const model of models.slice(1)) {
       if (![404, 429, 503].includes(response.status)) break;
@@ -105,24 +110,21 @@ ${enfoqueLegal}
       );
     }
 
-    const data = await response.json();
-    const text =
-      data?.candidates?.[0]?.content?.parts
-        ?.map((part: { text?: string }) => part.text ?? "")
-        .join("") ?? "";
-    if (!text.trim()) {
-      console.error("LEX AI chat returned no response:", {
-        blockReason: data?.promptFeedback?.blockReason,
-        finishReason: data?.candidates?.[0]?.finishReason,
-      });
+    if (!response.body) {
+      console.error("Gemini streaming API returned no response body");
       return new Response(
-        JSON.stringify({ error: "LEX AI no devolvió una respuesta. Intenta de nuevo." }),
+        JSON.stringify({ error: "LEX AI no pudo iniciar la respuesta. Intenta de nuevo." }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    const stream = `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] })}\n\ndata: [DONE]\n\n`;
-    return new Response(stream, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+
+    return new Response(response.body, {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+      },
     });
   } catch (e) {
     console.error("lex-ai-chat error:", e);

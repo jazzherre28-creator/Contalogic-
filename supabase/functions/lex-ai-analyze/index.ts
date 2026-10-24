@@ -76,7 +76,9 @@ Antes de emitir conclusiones, concilia las cifras estructuradas con el texto fue
 ESTADO DE SITUACIÓN FINANCIERA:
 - Presenta activos, pasivos y patrimonio solo si el documento informa esos totales; no derives el patrimonio como diferencia para ocultar datos faltantes.
 - Calcula razón corriente = activos corrientes / pasivos corrientes; prueba ácida = (activos corrientes - inventarios) / pasivos corrientes; capital de trabajo = activos corrientes - pasivos corrientes.
-- Calcula solvencia, endeudamiento, autonomía y A = P + patrimonio solo si están disponibles los totales requeridos. Si falta alguno, escribe "N/D" y explica cuál falta.
+- Calcula endeudamiento = pasivos totales / activos totales y autonomía = patrimonio / activos totales. No inviertas ni intercambies estas fórmulas. Por ejemplo, con activos de 80.000.000, pasivos de 30.000.000 y patrimonio de 50.000.000, endeudamiento = 37,5% y autonomía = 62,5%.
+- Calcula solvencia y A = P + patrimonio solo si están disponibles los totales requeridos. Si falta alguno, escribe "N/D" y explica cuál falta.
+- Antes de responder, verifica que cada porcentaje use el numerador, denominador y nombre de indicador correctos, y que los subtotales calculados coincidan con sus valores reportados.
 - Comprueba la suma de componentes frente a subtotales y el total de activos frente a las secciones corriente y no corriente.
 
 ESTADO DE RESULTADOS:
@@ -117,7 +119,12 @@ Analiza todas las cifras disponibles de este documento y verifica la consistenci
           }),
         },
       );
-    const models = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.1-flash-lite"];
+    const models = [
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
+      "gemini-3.6-flash",
+      "gemini-3.8-flash",
+    ];
     let response = await requestModel(models[0]);
     for (const model of models.slice(1)) {
       if (![404, 429, 503].includes(response.status)) break;

@@ -12,6 +12,11 @@ export const Route = createFileRoute("/_app/lex-ai")({
 });
 
 type Msg = { role: "user" | "assistant"; content: string };
+type GeminiStreamEvent = {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
+  }>;
+};
 
 function LexAiPage() {
   const { profile } = useAuth();
@@ -82,7 +87,6 @@ function LexAiPage() {
       const decoder = new TextDecoder();
       let buffer = "";
       let assistant = "";
-      let done = false;
 
       setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
@@ -99,34 +103,52 @@ function LexAiPage() {
         });
       };
 
+      const processEvent = (event: string) => {
+        const data = event
+          .split("\n")
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trimStart())
+          .join("\n");
+        if (!data || data === "[DONE]") return;
+
+        let parsed: GeminiStreamEvent;
+        try {
+          parsed = JSON.parse(data) as GeminiStreamEvent;
+        } catch {
+          throw new Error("LEX AI envió una respuesta incompleta. Intenta de nuevo.");
+        }
+
+        const chunk =
+          parsed.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
+        if (chunk) upsert(chunk);
+      };
+
+      let done = false;
       while (!done) {
         const { done: d, value } = await reader.read();
-        if (d) break;
-        buffer += decoder.decode(value, { stream: true });
-        let nl: number;
-        while ((nl = buffer.indexOf("\n")) !== -1) {
-          let line = buffer.slice(0, nl);
-          buffer = buffer.slice(nl + 1);
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          if (!line.startsWith("data: ")) continue;
-          const json = line.slice(6).trim();
-          if (json === "[DONE]") {
-            done = true;
-            break;
-          }
-          try {
-            const parsed = JSON.parse(json);
-            const c =
-              parsed.choices?.[0]?.delta?.content ??
-              parsed.candidates?.[0]?.content?.parts
-                ?.map((part: { text?: string }) => part.text ?? "")
-                .join("");
-            if (c) upsert(c);
-          } catch {
-            buffer = line + "\n" + buffer;
-            break;
-          }
+        if (d) {
+          buffer += decoder.decode();
+          done = true;
+        } else {
+          buffer += decoder.decode(value, { stream: true });
         }
+
+        buffer = buffer.replace(/\r\n/g, "\n");
+        let separator: number;
+        while ((separator = buffer.indexOf("\n\n")) !== -1) {
+          const event = buffer.slice(0, separator);
+          buffer = buffer.slice(separator + 2);
+          processEvent(event);
+        }
+
+        if (done && buffer.trim()) {
+          processEvent(buffer);
+          buffer = "";
+        }
+      }
+
+      if (!assistant.trim()) {
+        throw new Error("LEX AI no devolvió una respuesta. Intenta de nuevo.");
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Error de conexión");
